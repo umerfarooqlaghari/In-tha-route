@@ -1,0 +1,201 @@
+[30/09/2026, 14:51:30] Christian bark: ‎Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them.
+[30/09/2026, 14:51:30] Alpha development: Hi Christian, Umer here.
+
+We just had a call for mobile development
+[30/09/2026, 14:51:40] Christian bark: Omar?
+[30/09/2026, 14:51:46] Christian bark: Umer
+[30/09/2026, 14:51:49] Christian bark: Ok sorry
+[30/09/2026, 14:52:01] Alpha development: Yes
+[30/09/2026, 14:52:05] Alpha development: https://apps.apple.com/pk/app/grabengo-store/id6781679450
+[30/09/2026, 14:52:38] Alpha development: For the UberEats type app for Delivery only! I have experience with that. The above app is created by me and is 99% similar
+[30/09/2026, 18:27:56] Christian bark: Hi what’s your name? I don’t do sales, just deliveries.
+[30/09/2026, 18:30:33] Alpha development: My name’s Umer, I’m the founder of Alpha Devs, The link I sent above was for a Mobile app that we developed, I shared that because it closely aligned with what you wanted, excluding the pickup ‎<This message was edited>
+[30/09/2026, 18:33:16] Alpha development: How do you want to proceed with your application, do you have a design in mind, a stack, a set of requirements
+[30/09/2026, 18:42:22] Christian bark: Before proceed I would like to know where ate you based, if you have experience to build just delivery apps, if you have had build any before if yes your portfolio
+[30/09/2026, 18:44:28] Alpha development: Yes, absolutely! We are a registered organization based in London, UK. I was in Saudia Arabia a week ago for the Leap Conference and now in Dubai.
+
+My development team is based in Phillipines and Pakistan. 
+
+We have a very rich portfolio. Let me share that with you as-well as our website.
+[30/09/2026, 18:44:37] Alpha development: https://alpha-devs.cloud
+‎[30/09/2026, 18:47:23] Alpha development: Alpha-Devs Portfolio.pdf • ‎20 pages ‎<attached: 00000015-Alpha-Devs Portfolio.pdf>
+[30/09/2026, 22:40:42] Alpha development: Hi, Did you had the time to have a look
+[01/10/2026, 13:59:34] Christian bark: Hi Umer good morning. I didn’t have time yet as I got swamped of messages after I posted on Bark.
+[01/10/2026, 13:59:50] Christian bark: But I will take a look asap
+[01/10/2026, 14:01:37] Alpha development: Uhoh, Sure Christian. Take your time
+[02/10/2026, 12:15:54] Christian bark: Hi Sumer good morning
+[02/10/2026, 12:15:57] Christian bark: Before we proceed with the NDA, and so we can save time for both sides, I’d like to share the structure I expect to be developed:
+
+• Today, when my client needs to request a courier, they go onto my platform and manually submit the request by typing in the customer’s address. I want to optimise this through OCR (or any similar solution you may suggest) so the establishment doesn’t waste time typing. After scanning the receipt via OCR, the establishment will select the preparation time for the order, and a timer will begin.
+
+• The algorithm must be capable of grouping requests from different establishments for the same courier, respecting criteria that will be parameterised according to preparation time, distance, and calculating both the amount to be charged to the establishment and the amount to be paid to the courier (in cases where the establishment uses my couriers).
+
+• When the courier receives the delivery request, the app must display on the map the collection points, the delivery point, and the time at which the order will be ready.
+
+• In the cab module, the user will choose the nearest driver, and a dialogue box will open between them so they can negotiate the fare and the destination.
+
+I would like to know whether you are able to build these modules, as well as an approximate cost and timeframe for developing this solution.
+[02/10/2026, 15:18:20] Alpha development: Sure let me go through it
+[02/10/2026, 15:22:04] Alpha development: Ocr would be scanning the documents? That would work sure. It would be with mobile and the employee portal or the customer portal
+[02/10/2026, 15:25:58] Christian bark: Scanner should be available only through mobile app
+[02/10/2026, 15:27:53] Alpha development: Got it! That can be done.
+[02/10/2026, 15:28:29] Alpha development: Do you have a budget in mind? I mostly work with organisations so I quote them a high price, I wouldn’t want to over-quote you
+[02/10/2026, 16:29:51] Alpha development: Let me know, my team can start the development by today!
+[04/10/2026, 23:32:04] Alpha development: Hello Chrisitan, Waiting for your response, if you have any questions regarding our process, team or past projects please let us know
+[07/10/2026, 13:01:40] Christian bark: Good morning. I hope you’re well. I got swamped of messages on Barks and I’m now researching and organizing all developers. I’ll get in touch soon.
+[07/10/2026, 21:05:28] Alpha development: Sure! Take your time. Feel free to ask any questions, in the mean time if you want a demo, I can come up with a prototype
+[14/10/2026, 20:46:45] Alpha development: Hi Christian, Have you made the decision?
+[28/10/2026, 19:48:09] Alpha development: Hi, Following up on our conversation, are you available?
+[28/10/2026, 20:23:11] Christian bark: Hi Umer good afternoon
+‎[28/10/2026, 20:24:10] Christian bark: I would like to check it out ‎<attached: 00000034-PHOTO-2026-10-28-20-24-10.jpg>
+[28/10/2026, 20:24:41] Christian bark: Where could I downloaded?
+[28/10/2026, 20:25:52] Alpha development: Hello, this was an closed source project but we have transformed it into not just an ambulance tracking system, rather a fully functional industrial surveillance system. Had more clients that way
+[28/10/2026, 20:26:00] Alpha development: Its available on the browser
+[28/10/2026, 20:26:04] Alpha development: Let me get you the link
+[28/10/2026, 20:26:20] Christian bark: Yes pls
+[28/10/2026, 20:26:32] Alpha development: https://surveillance.alpha-devs.cloud/
+[28/10/2026, 20:26:44] Alpha development: Here you go!
+[28/10/2026, 20:27:37] Christian bark: I am talking about ambulance system
+[28/10/2026, 20:28:43] Alpha development: Yes this was previously the ambulance one, but we transformed it to this, this was because we had more clients this way.
+[28/10/2026, 20:28:58] Alpha development: I have another delivery type application I’m building
+[28/10/2026, 20:29:01] Alpha development: Wait let me share that
+[28/10/2026, 20:29:13] Alpha development: https://fleet-tracking-peach.vercel.app/
+
+email: herrigreinaldo@gmail.com
+pass: 132Careras@!
+[28/10/2026, 20:29:34] Alpha development: Please visit using a pc or laptop
+[28/10/2026, 20:29:42] Christian bark: Great, I’ll take a look on it tonight
+[28/10/2026, 20:29:47] Alpha development: Sure!
+[28/10/2026, 20:29:47] Christian bark: Ok
+[29/10/2026, 10:10:26] Alpha development: Hi, Did you have a look?
+[29/10/2026, 11:50:05] Christian bark: Good morning not yet sorry
+[29/10/2026, 12:06:04] Alpha development: No worriee, If you wanna see the mobile application we’re building for that client do let me know, I’ll add you to the testflight list
+[29/10/2026, 12:06:40] Christian bark: Ye I would like
+[29/10/2026, 12:07:10] Alpha development: If you have an iphone can you download the test flight app, and provide your email.
+[29/10/2026, 12:07:30] Christian bark: Yes I have
+‎[29/10/2026, 12:07:32] Alpha development: ‎<attached: 00000057-PHOTO-2026-10-29-12-07-32.jpg>
+[29/10/2026, 12:07:52] Alpha development: Please download this, and send me your email. I’ll forward an invite to download the beta application
+[29/10/2026, 12:07:52] Christian bark: Doesn’t work on Android?
+[29/10/2026, 12:08:06] Alpha development: I have currently built the android apk yet
+[29/10/2026, 12:08:16] Christian bark: Christian@inthakitchen.com
+[29/10/2026, 12:10:23] Alpha development: You’ll recieve an invite
+[29/10/2026, 12:10:53] Alpha development: Same credentials, Just a heads up that the application is still under development and the design is as per the clients need
+‎[29/10/2026, 12:27:29] Christian bark: I’ll do it later ‎<attached: 00000064-PHOTO-2026-10-29-12-27-29.jpg>
+[29/10/2026, 19:17:05] Alpha development: Sure sure, it would probably be in the email invite
+[30/10/2026, 16:17:13] Christian bark: Good morning
+[30/10/2026, 16:18:44] Christian bark: Im using the app, I like the design but I don’t understand how does works
+[30/10/2026, 16:20:33] Alpha development: Hello, its just how they operate, they have different routes, different people assigned with deliveries from DHL, DPD and etc. It was just to show my teams expertise, ofcourse your application would be exactly like yours
+‎[30/10/2026, 16:21:14] Christian bark: ‎<attached: 00000069-VIDEO-2026-10-30-16-21-14.mp4>
+[30/10/2026, 16:23:40] Christian bark: This is a Deliveroo live order, have you notice there are 2 orders from different restaurants to deliver 2 different costumers
+[30/10/2026, 16:23:57] Christian bark: Im looking for something similar
+[30/10/2026, 16:24:36] Alpha development: Got it! Yes that can be done.
+[30/10/2026, 16:24:55] Alpha development: 1 question, how do you get the info that from where to pickup the order
+[30/10/2026, 16:25:29] Alpha development: And where to drop off! Like who is going to be adding those locations
+‎[30/10/2026, 16:26:06] Christian bark: Comparatives.docx • ‎1 page ‎<attached: 00000075-Comparatives.docx>
+[30/10/2026, 16:26:20] Christian bark: Check the receipts
+[30/10/2026, 16:27:27] Christian bark: The restaurant receives this receipts from Uber, Deliveroo, Just Eat and from their own website
+[30/10/2026, 16:27:58] Alpha development: I see: and these are the exact requirements:
+
+Before we proceed with the NDA, and so we can save time for both sides, I’d like to share the structure I expect to be developed:
+
+• Today, when my client needs to request a courier, they go onto my platform and manually submit the request by typing in the customer’s address. I want to optimise this through OCR (or any similar solution you may suggest) so the establishment doesn’t waste time typing. After scanning the receipt via OCR, the establishment will select the preparation time for the order, and a timer will begin.
+
+• The algorithm must be capable of grouping requests from different establishments for the same courier, respecting criteria that will be parameterised according to preparation time, distance, and calculating both the amount to be charged to the establishment and the amount to be paid to the courier (in cases where the establishment uses my couriers).
+
+• When the courier receives the delivery request, the app must display on the map the collection points, the delivery point, and the time at which the order will be ready.
+
+• In the cab module, the user will choose the nearest driver, and a dialogue box will open between them so they can negotiate the fare and the destination.
+
+I would like to know whether you are able to build these modules, as well as an approximate cost and timeframe for developing this solution.
+[30/10/2026, 16:28:37] Alpha development: This was the message you sent earlier
+[30/10/2026, 16:28:41] Christian bark: Yes
+[30/10/2026, 16:28:48] Christian bark: It is clear for you?
+[30/10/2026, 16:28:53] Christian bark: Any question?
+[30/10/2026, 16:29:27] Alpha development: None so far. Understood.
+[30/10/2026, 16:30:03] Alpha development: When do you want to start
+[30/10/2026, 16:30:41] Christian bark: There are other information to share with you
+[30/10/2026, 16:31:00] Christian bark: There are 2 cases that must work in the same structure
+[30/10/2026, 16:31:54] Alpha development: Alrighht! Go ahead
+[30/10/2026, 16:35:44] Christian bark: 1 - the case is, the restaurants using their own drivers. The restaurant must be able to add their own driver without resquest documents in a easy way.
+2 - In this case the delivery drivers must apply through my app and they need fill up and downloads the documents required like drivers license, bank account, national insurance numbers, vehicle insurance, and others.
+[30/10/2026, 16:36:35] Alpha development: Got it, understood so far!
+[30/10/2026, 16:37:08] Alpha development: Once the drivers are onboardee, they apply for an order, if they get it. They go pick the order and deliver
+[30/10/2026, 16:37:35] Alpha development: The restaurant staff scans the receipts of the orders to publish address and items instead of manually typing it
+[30/10/2026, 16:37:37] Alpha development: Right?
+[30/10/2026, 16:37:52] Christian bark: That’s correct
+[30/10/2026, 16:38:02] Alpha development: Perfect
+[30/10/2026, 16:38:13] Alpha development: The restaurant staff doesn’t do anything else on the app?
+[30/10/2026, 16:39:56] Alpha development: And what kind of data would your user have as Admin to overlook the entire thing
+[30/10/2026, 16:39:57] Christian bark: They need to set up the time the order will be ready, so, the timer will start, and this time must appear to the driver app
+[30/10/2026, 16:40:12] Alpha development: Perfect
+[30/10/2026, 16:40:52] Christian bark: I’ve told I’m already have my own platform?
+[30/10/2026, 16:41:25] Christian bark: App.inthakitchen.com
+[30/10/2026, 16:42:26] Christian bark: So, I would like to make a copy of my platform adding the OCR, multiple collect points and deliveries.
+[30/10/2026, 16:44:14] Alpha development: Ahh thats nice.
+
+Would it possible if I can get the credentials to log in to your app via all three user types. Would be better to understand more
+[30/10/2026, 16:44:28] Christian bark: Yes you can
+[30/10/2026, 16:45:36] Christian bark: But first we need assign the NDA and book a meeting to explain what I need, there’s some tools I want to remove and you don’t need to built up
+[30/10/2026, 16:46:10] Christian bark: The platform will be 1 website and 1 app
+[30/10/2026, 16:46:48] Alpha development: Got it! When are you available for the meeting
+[30/10/2026, 16:47:09] Christian bark: Today I have website and 2 apps
+[30/10/2026, 16:47:26] Christian bark: Do you work at weekends?
+[30/10/2026, 16:47:41] Alpha development: I work all 7 days!
+[30/10/2026, 16:47:49] Christian bark: Hahahahaha, me too
+[30/10/2026, 16:47:53] Christian bark: Almost of them
+[30/10/2026, 16:48:09] Alpha development: Burden of running a website
+[30/10/2026, 16:48:23] Alpha development: Done! Let me know the time and day, I’ll send a google meet link?
+[30/10/2026, 16:49:04] Christian bark: I’ll do a effort for this weekend but I can’t promise
+[30/10/2026, 16:49:22] Christian bark: I’ll great is you download the apps to understand
+[30/10/2026, 16:49:35] Christian bark: In tha kitchen - driver
+[30/10/2026, 16:49:40] Christian bark: In tha route
+[30/10/2026, 16:49:45] Alpha development: Take your time. If you want I can start building a demo. Would save time
+[30/10/2026, 16:50:26] Christian bark: Do you have a notion about the price?
+[30/10/2026, 16:51:01] Alpha development:
+‎[30/10/2026, 16:51:01] Alpha development: ‎<attached: 00000121-PHOTO-2026-10-30-16-51-00.jpg>
+‎[30/10/2026, 16:51:01] Alpha development: ‎<attached: 00000122-PHOTO-2026-10-30-16-51-01.jpg>
+[30/10/2026, 16:51:31] Christian bark: Yes and yes
+[30/10/2026, 16:51:33] Alpha development: I would really like to get this project so I would want to do this with your budget! Do you have something in mind?
+[30/10/2026, 16:51:46] Christian bark: Not yet
+[30/10/2026, 16:52:12] Christian bark: How long to develop?
+[30/10/2026, 16:52:41] Alpha development: Around 4-5 weeks to develop. 
+
+The deployment takes some time on app store. They have strict regulations
+[30/10/2026, 16:52:56] Alpha development: Might even get it done before 4 weeks
+[30/10/2026, 16:53:38] Alpha development: I’m currently building a gym trainer app aswell, I’ll forward you the breakdown and everything I sent him so you can probably decide the price
+‎[30/10/2026, 16:54:13] Alpha development: Connor hookway Training and Diet System.xlsx ‎<attached: 00000130-Connor hookway Training and Diet System.xlsx>
+[30/10/2026, 17:44:58] Christian bark: Do you apply AI to build the mechanisms, structure, calculations, roterizations….
+[30/10/2026, 17:45:34] Alpha development: We can! If thats what you want
+[30/10/2026, 17:45:49] Alpha development: In the trainers case he had all the algorithms pre-designed
+[30/10/2026, 17:46:14] Christian bark: Without use AI?
+[30/10/2026, 17:46:41] Christian bark: Who is Reinaldo Herrig?
+[30/10/2026, 17:47:11] Alpha development: He’s another client of mine
+[30/10/2026, 17:47:20] Alpha development: Yes in that case we didn’t.
+[30/10/2026, 17:47:36] Alpha development: In your receipt scanning and interpretation of it
+[30/10/2026, 17:47:39] Alpha development: We will use AI
+[30/10/2026, 17:47:44] Alpha development: Probably Gemini or Grok
+[30/10/2026, 17:50:55] Christian bark: In this case you use AI to built this command and put it in algorithm?
+[30/10/2026, 17:52:22] Alpha development: Kind of like that, we set up guard railings, then use Gemini’s OCR to read the receipt. Then gemini would make sense of that binary data for it to be outputted in the app
+[30/10/2026, 17:53:31] Christian bark: About to built the mechanism who will calculate the route to the driver payments?
+[30/10/2026, 17:58:25] Christian bark: Eg: I’ve charging £5 the restaurant for a trip up to 2 miles. I pay £4 to the driver per order. If it is a batched order, I still charging £5 from the restaurant but I would like to pay £3.20 to the second order.  Then I will get £10 from the restaurant and I will pay £7.20 to the driver
+[30/10/2026, 18:02:42] Alpha development: Okay now I understand. We would be making an algorithm for that.
+[30/10/2026, 18:03:04] Alpha development: Follow up question: does a driver has a maximum of 2 deliveries? Within a single ride
+[30/10/2026, 18:03:07] Alpha development: Or can be more?
+[30/10/2026, 18:04:04] Christian bark: a maximun of 5#
+[30/10/2026, 18:04:28] Christian bark: with possibilities to increase in the future, i dont know
+[30/10/2026, 18:04:44] Alpha development: Thats doable. You can just lisr down the prices of each appending order you charge and what you pay. I’ll make the algorithm
+[30/10/2026, 18:05:00] Alpha development: That can be done. You can manage that in your administrator view
+[30/10/2026, 18:05:26] Christian bark: yes
+[30/10/2026, 18:14:26] Alpha development: Done will implement that
+[30/10/2026, 18:15:37] Alpha development: Do I work on a demo?
+[30/10/2026, 18:19:09] Christian bark: Not yet Umer, we just started a conversation. I don’t want commitment at the moment.
+[30/10/2026, 18:20:05] Christian bark: Could you gimme some reference about you. Reinaldo as reference should be good
+[30/10/2026, 18:52:21] Alpha development: Reinaldo is currently a potential client
+[30/10/2026, 18:52:27] Alpha development: You can talk to
+‎[30/10/2026, 18:52:48] Alpha development: ‎<attached: 00000159-Warren  Construction Scenery.vcf>
+‎[30/10/2026, 18:56:34] Alpha development: ‎<attached: 00000160-Ben Keville  Momentum Accounting.vcf>
+‎[30/10/2026, 18:56:49] Alpha development: ‎<attached: 00000161-Daniel Bark.vcf>
+[30/10/2026, 18:57:04] Alpha development: These are my past clients, you can mention Umer farooq
+[30/10/2026, 18:57:51] Alpha development: Reinaldo is a potential client whom I have built a demo for
+[30/10/2026, 22:25:46] Christian bark: Any relation about this Daniel and Bark platform that I met you?
+[30/10/2026, 22:53:47] Alpha development: Yeah I applied to his request through Bark as-well, Just like yours

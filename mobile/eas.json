@@ -1,0 +1,38 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote",
+    "promptToConfigurePushNotifications": false
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "credentialsSource": "local",
+      "autoIncrement": true,
+      "ios": {
+        "simulator": false
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascApiKeyPath": "./credentials/AuthKey_VTVNRS996B.p8",
+        "ascApiKeyIssuerId": "138bd8ae-ea40-4c7b-a543-2964deb4a55b",
+        "ascApiKeyId": "VTVNRS996B",
+        "appleTeamId": "2WQ7LU7T5X",
+        "ascAppId": "6829069581"
+      }
+    }
+  }
+}
