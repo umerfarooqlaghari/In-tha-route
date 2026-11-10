@@ -89,6 +89,11 @@ const pricingSchema = z
   .partial()
   .refine((o) => Object.keys(o).length > 0, { message: 'Nothing to update.' });
 
+const locationSchema = z.object({
+  latitude: z.number({ error: 'latitude is required.' }).min(-90).max(90),
+  longitude: z.number({ error: 'longitude is required.' }).min(-180).max(180),
+});
+
 const rejectSchema = z.object({ reason: z.string().trim().max(300).optional() });
 const uuidSchema = z.uuid('Invalid id.');
 
@@ -99,6 +104,7 @@ module.exports = {
   policySchema,
   availabilitySchema,
   pricingSchema,
+  locationSchema,
   rejectSchema,
   uuidSchema,
 };

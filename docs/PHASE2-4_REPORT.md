@@ -33,10 +33,15 @@ The demo "Sample receipts" chips were removed, since receipts now come from the 
 - Order pool → Add → `POST /api/driver/pool/:id/add`. The "+£" amount shown is calculated by the server for the next batch position.
 - The Call button dials the restaurant at a pickup and the customer at a drop-off.
 - Earnings (week chart, trips, online hours, rating, recent trips) come from real delivered orders.
+- **Live location (GPS):** while a driver is online or on a run with the app open, the phone sends its position to `PUT /api/driver/location` (about every 15 s, or after moving 75 m).
+  - The driver's map uses the real position.
+  - With a position less than 10 minutes old, the driver is only offered pickups within `DRIVER_OFFER_RADIUS_MILES` (default 3). Without one, every open order is considered.
+  - The offer card shows route miles and "~min" calculated by the server: the driver's position → the remaining stops, at a typical town speed for their vehicle, plus 3 minutes per stop.
+  - "Finding orders" shows the real number of open orders in the pool.
 
 ## Phase 4 — Admin
 
-- Overview: the Billed / Driver pay / Profit totals and the per-order margin come from the server.
+- Overview: the Billed / Driver pay / Profit totals and the per-order margin come from the server. The map shows every online driver at their latest GPS position.
 - Pricing: the steppers save through `PUT /api/admin/pricing`. The batch simulator and the "You keep" amounts come from the server's `pricingSummary`. Undelivered platform orders are re-priced when rates change.
 - Drivers: **Approve** (only possible once every document is uploaded) and a new **Reject** button with a confirmation. Tapping a document opens the photo the driver uploaded.
 - Restaurants: policy switch → `PATCH /api/admin/restaurants/:id/policy`.
@@ -55,7 +60,7 @@ Simulator(n) : restaurantsPay = n × fee, driverEarns = sum(first n tiers), prof
 
 ## Database
 
-Migration `002_operations.sql` (applied automatically on Render because `AUTO_MIGRATE=true`) adds:
+Migration `003_driver_location.sql` adds the driver's last GPS position. Migration `002_operations.sql` (applied automatically on Render because `AUTO_MIGRATE=true`) adds:
 pricing_config, orders, batches, batch_declines, kyc_documents, files, driver_online_sessions, restaurant coordinates, driver rating/rejected status.
 
 ## External setup needed (you can do these later)
@@ -67,5 +72,6 @@ pricing_config, orders, batches, batch_declines, kyc_documents, files, driver_on
 2. **Postcode lookup**: postcodes.io, free with no key. Nothing to set up.
    - Optional `DISTANCE_ROAD_FACTOR` (e.g. `1.3`) to turn straight-line miles into road miles. The default is 1.
 3. **File storage (AWS S3 or similar)**: optional for now. Document photos are currently stored in Postgres (max 6 MB each), which is fine for launch. When S3 is wanted, you will need a bucket, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `S3_BUCKET`. Only `backend/src/services/file.service.js` needs to change.
-4. **New app build**: the camera and photo library use `expo-image-picker`, which is a native module. Make a new development build (`npx expo run:ios` or `eas build --profile development`). Expo Go also includes it, so Expo Go works for testing.
-5. **Deploy**: push to GitHub → Render redeploys → migration 002 runs on start.
+4. **New app build**: the camera and photo library use `expo-image-picker`, and GPS uses `expo-location`. Both are native modules. Make a new development build (`npx expo run:ios` or `eas build --profile development`). Expo Go also includes it, so Expo Go works for testing.
+5. **Deploy**: push to GitHub → Render redeploys → migrations 002 and 003 run on start.
+6. **Background location (later, optional)**: GPS is only sent while the app is open. Tracking with the app in the background needs a development build with background location enabled and App Store / Play Store justification.

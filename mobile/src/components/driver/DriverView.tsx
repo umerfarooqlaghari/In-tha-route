@@ -124,6 +124,9 @@ function DriveScreen() {
     setActiveScreen,
     isOnline: online,
     setOnline,
+    myLocation,
+    routeEstimate,
+    orders,
   } = useInThaRoute();
   const { batch, stops, delivered } = useActiveBatch();
   const { busy, run } = useBusy();
@@ -136,7 +139,12 @@ function DriveScreen() {
 
   const stopIndex = Math.min(activeStopIndex, Math.max(stops.length - 1, 0));
   const current = stops[stopIndex];
-  const driverPos: LatLng = navigating && stopIndex > 0 ? stops[stopIndex - 1].coordinate : DRIVER_START;
+  // Real GPS position when available; otherwise the last stop reached, or the area default.
+  const driverPos: LatLng =
+    myLocation ?? (navigating && stopIndex > 0 ? stops[stopIndex - 1].coordinate : DRIVER_START);
+  const poolCount = orders.filter(
+    (o) => !o.batchId && o.status !== 'delivered' && o.dispatchType === 'open_platform'
+  ).length;
 
   const pins: MapPin[] = useMemo(() => {
     const list: MapPin[] = [{ id: 'driver', kind: 'driver', coordinate: driverPos }];
@@ -213,7 +221,9 @@ function DriveScreen() {
               <View style={styles.flexText}>
                 <Text style={styles.payout}>{formatGbp(totalPay)}</Text>
                 <Text style={styles.muted} numberOfLines={1}>
-                  {batch.length} orders · {totalMiles.toFixed(1)} mi · ~{Math.round(totalMiles * 6 + 6)} min
+                  {batch.length} {batch.length === 1 ? 'order' : 'orders'} ·{' '}
+                  {(routeEstimate?.miles || totalMiles).toFixed(1)} mi
+                  {routeEstimate ? ` · ~${routeEstimate.minutes} min` : ''}
                 </Text>
               </View>
             </View>
@@ -338,7 +348,7 @@ function DriveScreen() {
           </View>
         ) : (
           <View style={styles.sheetBody}>
-            <SearchingRow />
+            <SearchingRow poolCount={poolCount} />
             <View style={styles.actions}>
               <Button
                 label="Order pool"
@@ -383,7 +393,7 @@ function TimelineRow({ stop, last }: { stop: Stop; last: boolean }) {
   );
 }
 
-function SearchingRow() {
+function SearchingRow({ poolCount }: { poolCount: number }) {
   const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -405,7 +415,11 @@ function SearchingRow() {
       />
       <View style={styles.flexText}>
         <Text style={styles.sheetTitle}>Finding orders</Text>
-        <Text style={styles.muted}>Richmond & Twickenham are busy</Text>
+        <Text style={styles.muted}>
+          {poolCount > 0
+            ? `${poolCount} open ${poolCount === 1 ? 'order' : 'orders'} in the pool`
+            : 'No open orders right now'}
+        </Text>
       </View>
     </View>
   );
@@ -416,7 +430,7 @@ function SearchingRow() {
 /* ========================================================================== */
 
 function OrderPoolScreen() {
-  const { orders, algorithm, appendOrderToDriverBatch, setActiveScreen } = useInThaRoute();
+  const { orders, algorithm, appendOrderToDriverBatch, setActiveScreen, myLocation } = useInThaRoute();
   const { batch } = useActiveBatch();
   const { busy, run } = useBusy();
   const [toast, setToast] = useState<{ ok: boolean; message: string } | null>(null);
@@ -427,7 +441,7 @@ function OrderPoolScreen() {
   const full = batch.length >= algorithm.maxBatchSize;
 
   const pins: MapPin[] = [
-    { id: 'driver', kind: 'driver', coordinate: DRIVER_START },
+    { id: 'driver', kind: 'driver', coordinate: myLocation ?? DRIVER_START },
     ...pool.map((o, i) => ({
       id: o.id,
       kind: 'dropoff' as const,

@@ -10,6 +10,7 @@ import {
   refreshSession,
   setApiSession,
 } from '@/services/apiClient';
+import { useDriverLocation } from '@/services/driverLocation';
 import { clearSession, loadSession, saveSession } from '@/services/sessionStore';
 import type { PickedImage } from '@/utils/pickImage';
 
@@ -141,6 +142,8 @@ export interface DriverProfile {
   status: 'approved_online' | 'pending_kyc' | 'offline';
   approval?: 'approved' | 'rejected' | 'pending';
   isOnline?: boolean;
+  /** Last GPS position, if recent (admin map and the driver's own profile). */
+  location?: (LatLng & { updatedAt: string }) | null;
   rating: number;
   completedDeliveries: number;
   niNumber?: string;
@@ -201,6 +204,12 @@ export interface AdminTotals {
 
 type BatchStatus = 'offered' | 'accepted_navigating' | 'declined';
 
+/** Server estimate for the stops still to do in the current run. */
+export interface RouteEstimate {
+  miles: number;
+  minutes: number;
+}
+
 /** What `GET /api/{role}/dashboard` returns. Every change endpoint returns a fresh one too. */
 interface Dashboard {
   role: UserRole;
@@ -214,6 +223,7 @@ interface Dashboard {
   driverBatchStatus?: BatchStatus;
   activeStopIndex?: number;
   isOnline?: boolean;
+  routeEstimate?: RouteEstimate | null;
   earnings?: DriverEarnings;
   pricingSummary?: PricingSummary;
   totals?: AdminTotals;
@@ -314,6 +324,9 @@ interface InThaRouteContextType {
   me: DriverProfile | null;
   isOnline: boolean;
   setOnline: (online: boolean) => Promise<boolean>;
+  /** This device's GPS position while the driver is online or on a run. */
+  myLocation: LatLng | null;
+  routeEstimate: RouteEstimate | null;
   earnings: DriverEarnings | null;
   currentBatchId: string | null;
   driverBatchStatus: BatchStatus;
@@ -561,6 +574,12 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
     if (!screens.some((s) => s.key === activeScreen)) setActiveScreen(screens[0].key);
   }, [screens, activeScreen]);
 
+  // Track GPS while an approved driver is online or still on a run.
+  const onRun = data?.driverBatchStatus === 'accepted_navigating' && !!data.currentBatchId;
+  const myLocation = useDriverLocation(
+    isLoggedIn && role === 'driver' && driverApproval === 'approved' && (!!data?.isOnline || onRun)
+  );
+
   /* ---------------------------------------------------------------------- */
   /* Actions                                                                 */
   /* ---------------------------------------------------------------------- */
@@ -746,6 +765,8 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         me,
         isOnline: data?.isOnline ?? false,
         setOnline,
+        myLocation,
+        routeEstimate: data?.routeEstimate ?? null,
         earnings: data?.earnings ?? null,
         currentBatchId: data?.currentBatchId ?? null,
         driverBatchStatus: data?.driverBatchStatus ?? 'declined',

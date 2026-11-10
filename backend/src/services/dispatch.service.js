@@ -2,6 +2,7 @@ const db = require('../config/db');
 const AppError = require('../utils/AppError');
 const geo = require('./geo.service');
 const pricing = require('./pricing.service');
+const { freshLocation } = require('./driver.service');
 
 /**
  * Batches: a driver's run of one or more orders.
@@ -15,6 +16,10 @@ const pricing = require('./pricing.service');
  *   accepted -> completed                    (in-house driver: assigned directly)
  */
 const REOFFER_AFTER_MINUTES = 10; // a declined order is not offered to the same driver again this soon
+
+// How far (straight line) a driver may be from the first pickup of an offer.
+const OFFER_RADIUS_MILES =
+  Number(process.env.DRIVER_OFFER_RADIUS_MILES) > 0 ? Number(process.env.DRIVER_OFFER_RADIUS_MILES) : 3;
 
 const isApproved = (status) => status === 'approved_online' || status === 'offline';
 
@@ -90,10 +95,21 @@ async function offerNextBatch(driverId) {
       ).rows.map((r) => [r.id, r.latitude != null ? { latitude: r.latitude, longitude: r.longitude } : null])
     );
 
-    const first = candidates[0];
+    // With a recent GPS fix, only offer pickups within reach of the driver.
+    // Without one (location off or not sent yet) every open order is considered.
+    const here = freshLocation(driver);
+    const reachable = here
+      ? candidates.filter((c) => {
+          const pickup = coords.get(c.restaurant_id);
+          return !pickup || geo.straightLineMiles(here, pickup) <= OFFER_RADIUS_MILES;
+        })
+      : candidates;
+    if (reachable.length === 0) return null;
+
+    const first = reachable[0];
     const group = [first];
     const windowMs = config.maxPrepTimeWindowMinutes * 60000;
-    for (const c of candidates.slice(1)) {
+    for (const c of reachable.slice(1)) {
       if (group.length >= config.maxBatchSize) break;
       if (Math.abs(c.ready_at - first.ready_at) > windowMs) continue;
       if (c.restaurant_id !== first.restaurant_id) {

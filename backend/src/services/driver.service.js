@@ -14,6 +14,20 @@ const DRIVER_SELECT = `
 
 const isApproved = (status) => status === 'approved_online' || status === 'offline';
 
+/** A position older than this is not used for dispatch or shown on the admin map. */
+const LOCATION_FRESH_MINUTES = 10;
+
+/** Last GPS fix if it is recent enough to trust, else null. */
+function freshLocation(row, now = new Date()) {
+  if (row.last_latitude == null || row.last_longitude == null || !row.last_location_at) return null;
+  if (now - new Date(row.last_location_at) > LOCATION_FRESH_MINUTES * 60000) return null;
+  return {
+    latitude: row.last_latitude,
+    longitude: row.last_longitude,
+    updatedAt: new Date(row.last_location_at).toISOString(),
+  };
+}
+
 /**
  * Shape the mobile app calls a "driver profile".
  * `status` follows the app's three values. For lists shown to admins and
@@ -35,6 +49,7 @@ function toProfile(row, documents = [], { self = false } = {}) {
     status: self ? (row.status === 'rejected' ? 'pending_kyc' : row.status) : approved ? 'approved_online' : 'pending_kyc',
     approval: approved ? 'approved' : row.status === 'rejected' ? 'rejected' : 'pending',
     isOnline: row.status === 'approved_online',
+    location: freshLocation(row),
     rating: Number(row.rating),
     completedDeliveries: row.completed_deliveries,
     kycDocuments: documents,
@@ -120,6 +135,16 @@ async function setOnline(driverId, online) {
   });
 }
 
+/** Stores the driver's latest GPS position. */
+async function updateLocation(driverId, { latitude, longitude }) {
+  await db.query(
+    `UPDATE driver_profiles
+        SET last_latitude = $1, last_longitude = $2, last_location_at = now()
+      WHERE id = $3`,
+    [latitude, longitude, driverId]
+  );
+}
+
 const shortArea = (address) => {
   const parts = String(address || '').split(',').map((p) => p.trim()).filter(Boolean);
   return parts[parts.length - 1] || 'Delivery';
@@ -191,6 +216,8 @@ module.exports = {
   listAll,
   createOwnDriver,
   setOnline,
+  updateLocation,
+  freshLocation,
   earnings,
   shortArea,
 };

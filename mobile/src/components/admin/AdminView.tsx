@@ -21,7 +21,7 @@ import {
 } from '@/components/ui';
 import { API_URL } from '@/constants/api';
 import { Brand, formatGbp } from '@/constants/brand';
-import { coordsForPostcode, DRIVER_START } from '@/constants/geo';
+import { coordsForPostcode } from '@/constants/geo';
 import { DriverPolicy, DriverProfile, KycDocument, useInThaRoute } from '@/context/InThaRouteContext';
 import { getAccessToken } from '@/services/apiClient';
 
@@ -54,7 +54,9 @@ export function AdminView() {
 /* ========================================================================== */
 
 function OverviewScreen() {
-  const { orders, restaurants, totals } = useInThaRoute();
+  const { orders, restaurants, totals, drivers } = useInThaRoute();
+  // Online drivers whose app has sent a recent GPS position.
+  const liveDrivers = drivers.filter((d) => d.isOnline && d.location);
   const active = orders.filter((o) => o.status !== 'delivered');
   // Today's live and delivered orders, totalled by the server.
   const billed = totals?.billedGbp ?? 0;
@@ -62,7 +64,11 @@ function OverviewScreen() {
   const profit = totals?.profitGbp ?? 0;
 
   const pins: MapPin[] = [
-    { id: 'driver', kind: 'driver', coordinate: DRIVER_START },
+    ...liveDrivers.map((d) => ({
+      id: `drv-${d.id}`,
+      kind: 'driver' as const,
+      coordinate: { latitude: d.location!.latitude, longitude: d.location!.longitude },
+    })),
     ...restaurants.map((r) => ({
       id: r.id,
       kind: 'restaurant' as const,

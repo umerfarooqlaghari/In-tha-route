@@ -46,6 +46,12 @@
           "photosPermission": "In Tha Route lets you choose a receipt or document photo from your library.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "In Tha Route shows your position on the map and offers you orders near you while you are online."
+        }
       ]
     ],
     "experiments": {

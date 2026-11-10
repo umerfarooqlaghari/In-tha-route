@@ -16,6 +16,7 @@ router.post('/documents/:id/upload', h(c.uploadDocument)); // KYC photo (open to
 
 // Everything below needs an approved driver.
 router.put('/availability', approved, h(c.setAvailability)); // online / offline
+router.put('/location', approved, h(c.updateLocation)); // GPS position while the app is open
 router.post('/batch/accept', approved, h(c.acceptBatch));
 router.post('/batch/decline', approved, h(c.declineBatch));
 router.post('/batch/advance', approved, h(c.advanceStop)); // "Picked up" / "Delivered"

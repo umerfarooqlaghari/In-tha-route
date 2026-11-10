@@ -2,6 +2,7 @@ const db = require('../config/db');
 const { parse } = require('../middleware/validate');
 const dispatch = require('../services/dispatch.service');
 const drivers = require('../services/driver.service');
+const geo = require('../services/geo.service');
 const kyc = require('../services/kyc.service');
 const orders = require('../services/order.service');
 const pricing = require('../services/pricing.service');
@@ -18,6 +19,42 @@ const driverPricing = (config) => ({
   maxPrepTimeWindowMinutes: config.maxPrepTimeWindowMinutes,
   maxPickupRadiusMiles: config.maxPickupRadiusMiles,
 });
+
+// Typical average speeds in town, used for the "~min" estimate on an offer.
+const SPEED_MPH = { 'Motorcycle / Scooter': 16, Car: 14, 'E-Bike': 11 };
+const MINUTES_PER_STOP = 3;
+
+/**
+ * Miles and minutes for the stops still to do, starting from where the driver
+ * is (if the app has sent a recent GPS fix). Stops: all pickups, then all drop-offs.
+ */
+function routeEstimate(row, batchOrders, fromStop) {
+  const stops = [
+    ...batchOrders.map((o) => o.pickupCoords),
+    ...batchOrders.map((o) => o.dropoffCoords),
+  ].slice(fromStop);
+  if (stops.length === 0) return null;
+
+  let miles = 0;
+  let previous = drivers.freshLocation(row);
+  let stopCount = 0;
+  let lastPickup = null;
+  stops.forEach((point, i) => {
+    const isPickup = i + fromStop < batchOrders.length;
+    // Several orders from one restaurant are a single stop.
+    const samePickup = isPickup && lastPickup && point && point.latitude === lastPickup.latitude && point.longitude === lastPickup.longitude;
+    if (!samePickup) stopCount += 1;
+    if (isPickup) lastPickup = point;
+    if (point && previous) miles += geo.deliveryMiles(previous, point);
+    if (point) previous = point;
+  });
+
+  const speed = SPEED_MPH[row.vehicle] || 14;
+  return {
+    miles: Number(miles.toFixed(1)),
+    minutes: Math.max(1, Math.round((miles / speed) * 60 + stopCount * MINUTES_PER_STOP)),
+  };
+}
 
 const BATCH_STATUS = { offered: 'offered', accepted: 'accepted_navigating', completed: 'accepted_navigating' };
 
@@ -49,6 +86,9 @@ async function buildDashboard(user, { offer = true } = {}) {
     driverBatchStatus: batch ? BATCH_STATUS[batch.status] : 'declined',
     activeStopIndex: batch && batch.status === 'accepted' ? batch.active_stop_index : 0,
     isOnline: row.status === 'approved_online',
+    routeEstimate: batch && batch.status !== 'completed'
+      ? routeEstimate(row, batchOrders, batch.status === 'accepted' ? batch.active_stop_index : 0)
+      : null,
     earnings: await drivers.earnings(row),
   };
 }
@@ -61,6 +101,13 @@ async function setAvailability(req, res) {
   const { online } = parse(v.availabilitySchema, req.body);
   await drivers.setOnline(req.user.driver_id, online);
   res.json({ dashboard: await buildDashboard(req.user) });
+}
+
+/** The app sends its GPS position while open; no dashboard in the reply to keep it light. */
+async function updateLocation(req, res) {
+  const location = parse(v.locationSchema, req.body);
+  await drivers.updateLocation(req.user.driver_id, location);
+  res.status(204).end();
 }
 
 async function acceptBatch(req, res) {
@@ -107,6 +154,7 @@ async function uploadDocument(req, res) {
 module.exports = {
   dashboard,
   setAvailability,
+  updateLocation,
   acceptBatch,
   declineBatch,
   advanceStop,
