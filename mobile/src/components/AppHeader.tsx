@@ -12,10 +12,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Avatar, IconButton, Segmented } from '@/components/ui';
+import { Avatar, IconButton } from '@/components/ui';
 import { Brand } from '@/constants/brand';
 import { PERSONAS } from '@/constants/personas';
-import { ROLE_SCREENS, useInThaRoute, UserRole } from '@/context/InThaRouteContext';
+import { ROLE_SCREENS, useInThaRoute } from '@/context/InThaRouteContext';
 
 const C = Brand.colors;
 
@@ -54,7 +54,7 @@ export function AppHeader() {
   const insets = useSafeAreaInsets();
       const {width} = useWindowDimensions();
       const drawerWidth = Math.min(320, width * 0.84);
-      const {role, activeScreen, setActiveScreen, loginAsRole, logout, user} = useInThaRoute();
+      const {role, activeScreen, setActiveScreen, logout, user} = useInThaRoute();
       const persona = PERSONAS[role];
       const profileName = user?.fullName ?? persona.name;
       const profileOrg = user ? user.restaurant?.name ?? persona.label : persona.org;
@@ -158,23 +158,6 @@ export function AppHeader() {
 
           <View style={styles.spacer} />
 
-          {/* Demo role switcher */}
-          <View style={styles.switcher}>
-            <Text style={styles.switcherLabel}>DEMO · SWITCH VIEW</Text>
-            <Segmented<UserRole>
-              value={role}
-              onChange={(r) => {
-                loginAsRole(r);
-                onClose();
-              }}
-              options={[
-                { value: 'restaurant', label: 'Restaurant' },
-                { value: 'driver', label: 'Driver' },
-                { value: 'admin', label: 'Admin' },
-              ]}
-            />
-          </View>
-
           <Pressable
             onPress={() => {
               onClose();
@@ -244,8 +227,6 @@ export function AppHeader() {
       navTitleActive: {color: C.primary },
       navSubtitle: {fontSize: 12, color: C.ink3, marginTop: 1 },
       spacer: {flex: 1 },
-      switcher: {gap: 8, paddingBottom: 12 },
-      switcherLabel: {...Brand.type.micro, color: C.ink3, paddingHorizontal: 4 },
       logout: {
         flexDirection: 'row',
       alignItems: 'center',

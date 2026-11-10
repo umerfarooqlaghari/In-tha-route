@@ -37,7 +37,6 @@ export function SignupScreen({
   const [restaurantName, setRestaurantName] = useState('');
   const [address, setAddress] = useState('');
   const [postcode, setPostcode] = useState('');
-  const [pickupSafetyNote, setPickupSafetyNote] = useState('');
   const [vehicle, setVehicle] = useState<Vehicle>('Motorcycle / Scooter');
   const [plateNumber, setPlateNumber] = useState('');
 
@@ -81,7 +80,6 @@ export function SignupScreen({
           restaurantName: restaurantName.trim(),
           address: address.trim(),
           postcode: postcode.trim(),
-          pickupSafetyNote: pickupSafetyNote.trim() || undefined,
         }
       : {
           ...base,
@@ -154,8 +152,8 @@ export function SignupScreen({
           error={errors.password}
           secureTextEntry
           autoCapitalize="none"
-          autoComplete="new-password"
-          textContentType="newPassword"
+          autoComplete="password"
+          textContentType="password"
         />
         {!errors.password && (
           <Text style={styles.help}>At least 8 characters, with a letter and a number.</Text>
@@ -188,13 +186,6 @@ export function SignupScreen({
               autoCorrect={false}
               placeholder="TW9 1DT"
               textContentType="postalCode"
-            />
-            <Field
-              label="Pickup note for drivers (optional)"
-              value={pickupSafetyNote}
-              onChangeText={setPickupSafetyNote}
-              error={errors.pickupSafetyNote}
-              placeholder="e.g. Collect from the side counter"
             />
           </>
         ) : (

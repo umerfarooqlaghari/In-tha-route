@@ -11,7 +11,10 @@ import { Brand } from '@/constants/brand';
 import { useInThaRoute } from '@/context/InThaRouteContext';
 
 export default function HomeScreen() {
-  const { isLoggedIn, role } = useInThaRoute();
+  const { isRestoring, isLoggedIn, role } = useInThaRoute();
+
+  // Brief blank frame while the saved session is read, so the welcome screen doesn't flash.
+  if (isRestoring) return <View style={styles.root} />;
 
   return (
     <View style={styles.root}>

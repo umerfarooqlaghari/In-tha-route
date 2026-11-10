@@ -105,6 +105,10 @@ export const signupRequest = (input: SignupInput) => post<AuthSession>('/api/aut
 export const loginRequest = (email: string, password: string) =>
   post<AuthSession>('/api/auth/login', { email, password });
 
+/** Trades a refresh token for a new session. Each refresh token works once. */
+export const refreshRequest = (refreshToken: string) =>
+  post<AuthSession>('/api/auth/refresh', { refreshToken });
+
 /** Best effort: the local session is cleared whether or not this reaches the server. */
 export const logoutRequest = (refreshToken: string) => {
   post('/api/auth/logout', { refreshToken }).catch(() => {});

@@ -1,6 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
-import { AuthSession, AuthUser, logoutRequest } from '@/services/authApi';
+import {
+  ApiError,
+  AuthSession,
+  AuthUser,
+  logoutRequest,
+  refreshRequest,
+} from '@/services/authApi';
+import { clearSession, loadSession, saveSession } from '@/services/sessionStore';
 
 export type UserRole = 'restaurant' | 'driver' | 'admin';
 
@@ -606,6 +613,8 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
 };
 
 interface InThaRouteContextType {
+  /** True while the saved session is being read on launch. */
+  isRestoring: boolean;
   isLoggedIn: boolean;
   role: UserRole;
   activeScreen: string;
@@ -614,7 +623,6 @@ interface InThaRouteContextType {
   user: AuthUser | null;
   /** Enter the app with a session from the signup or login API. */
   signIn: (session: AuthSession) => void;
-  loginAsRole: (role: UserRole) => void;
   logout: () => void;
   orders: LiveOrder[];
   drivers: DriverProfile[];
@@ -663,7 +671,9 @@ const InThaRouteContext = createContext<InThaRouteContextType | undefined>(undef
 
 export function InThaRouteProvider({ children }: { children: React.ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
-  const [session, setSession] = useState<AuthSession | null>(null);
+  const [isRestoring, setIsRestoring] = useState<boolean>(true);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [role, setRoleState] = useState<UserRole>('restaurant');
   const [activeScreen, setActiveScreen] = useState<string>('scan_receipt');
   const [orders, setOrders] = useState<LiveOrder[]>(INITIAL_ORDERS);
@@ -677,23 +687,65 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
   >('offered');
   const [activeStopIndex, setActiveStopIndex] = useState<number>(0);
 
-  const loginAsRole = (targetRole: UserRole) => {
-    setRoleState(targetRole);
-    setActiveScreen(ROLE_SCREENS[targetRole][0].key);
+  // The role always comes from the server (or from the profile it returned
+  // earlier and we stored securely), never from a choice in the UI.
+  const enter = (account: AuthUser) => {
+    setUser(account);
+    setRoleState(account.role);
+    setActiveScreen(ROLE_SCREENS[account.role][0].key);
     setIsLoggedIn(true);
   };
 
-  // The role always comes from the server's response, never from a choice in the UI.
   const signIn = (next: AuthSession) => {
-    setSession(next);
-    loginAsRole(next.user.role);
+    setRefreshToken(next.tokens.refreshToken);
+    enter(next.user);
+    saveSession(next);
+  };
+
+  const signOutLocally = () => {
+    setUser(null);
+    setRefreshToken(null);
+    setIsLoggedIn(false);
+    clearSession();
   };
 
   const logout = () => {
-    if (session) logoutRequest(session.tokens.refreshToken);
-    setSession(null);
-    setIsLoggedIn(false);
+    if (refreshToken) logoutRequest(refreshToken);
+    signOutLocally();
   };
+
+  // On launch: reopen the saved account straight away, then confirm it with the
+  // server. If the server rejects the session (expired, revoked, account
+  // disabled) the user is signed out; if the server is just unreachable they stay in.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const stored = await loadSession();
+      if (cancelled) return;
+      if (!stored) {
+        setIsRestoring(false);
+        return;
+      }
+      setRefreshToken(stored.refreshToken);
+      enter(stored.user);
+      setIsRestoring(false);
+      try {
+        const fresh = await refreshRequest(stored.refreshToken);
+        if (cancelled) return;
+        setRefreshToken(fresh.tokens.refreshToken);
+        setUser(fresh.user);
+        if (fresh.user.role !== stored.user.role) enter(fresh.user);
+        await saveSession(fresh);
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.code !== 'NETWORK_ERROR') signOutLocally();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1058,9 +1110,9 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         role,
         activeScreen,
         setActiveScreen,
-        user: session?.user ?? null,
+        isRestoring,
+        user,
         signIn,
-        loginAsRole,
         logout,
         orders,
         drivers,
