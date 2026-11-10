@@ -92,6 +92,9 @@ const refreshSchema = z.object({
 module.exports = {
   emailSchema,
   passwordSchema,
+  fullNameSchema,
+  phoneSchema,
+  postcodeSchema,
   SIGNUP_SCHEMAS,
   loginSchema,
   refreshSchema,

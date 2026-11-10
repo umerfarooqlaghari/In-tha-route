@@ -28,7 +28,18 @@ export const AREA_CENTER: LatLng = { latitude: 51.4555, longitude: -0.3290 };
 
 export const DRIVER_START: LatLng = { latitude: 51.4598, longitude: -0.3105 };
 
+// Real coordinates sent by the API, keyed by postcode without spaces.
+const liveCoords = new Map<string, LatLng>();
+const compact = (postcode: string) => postcode.replace(/\s+/g, '').toUpperCase();
+
+/** Remember where a postcode really is, so the maps place its pin correctly. */
+export function registerPostcodeCoords(postcode: string | undefined, coords: LatLng | null | undefined) {
+  if (postcode && coords) liveCoords.set(compact(postcode), coords);
+}
+
 export function coordsForPostcode(postcode: string): LatLng {
+  const live = liveCoords.get(compact(postcode));
+  if (live) return live;
   const key = postcode.trim().toUpperCase();
   if (POSTCODE_COORDS[key]) return POSTCODE_COORDS[key];
   // Deterministic fallback near the area centre for unknown postcodes

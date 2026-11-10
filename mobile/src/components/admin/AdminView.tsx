@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LiveMap, MapPin } from '@/components/LiveMap';
 import {
@@ -15,12 +15,15 @@ import {
   Screen,
   SectionLabel,
   Segmented,
+  Sheet,
   Stat,
   Stepper,
 } from '@/components/ui';
+import { API_URL } from '@/constants/api';
 import { Brand, formatGbp } from '@/constants/brand';
 import { coordsForPostcode, DRIVER_START } from '@/constants/geo';
-import { DriverPolicy, DriverProfile, useInThaRoute } from '@/context/InThaRouteContext';
+import { DriverPolicy, DriverProfile, KycDocument, useInThaRoute } from '@/context/InThaRouteContext';
+import { getAccessToken } from '@/services/apiClient';
 
 const C = Brand.colors;
 const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
@@ -51,13 +54,12 @@ export function AdminView() {
 /* ========================================================================== */
 
 function OverviewScreen() {
-  const { orders, restaurants } = useInThaRoute();
+  const { orders, restaurants, totals } = useInThaRoute();
   const active = orders.filter((o) => o.status !== 'delivered');
-  const billed = orders.reduce((s, o) => s + o.restaurantFeeGbp, 0);
-  const paid = orders
-    .filter((o) => o.dispatchType === 'open_platform')
-    .reduce((s, o) => s + o.driverPayoutGbp, 0);
-  const profit = billed - paid;
+  // Today's live and delivered orders, totalled by the server.
+  const billed = totals?.billedGbp ?? 0;
+  const paid = totals?.driverPayGbp ?? 0;
+  const profit = totals?.profitGbp ?? 0;
 
   const pins: MapPin[] = [
     { id: 'driver', kind: 'driver', coordinate: DRIVER_START },
@@ -108,7 +110,7 @@ function OverviewScreen() {
           <EmptyState icon="receipt-outline" title="No live orders" />
         ) : (
           active.map((o, i) => {
-            const margin = o.restaurantFeeGbp - o.driverPayoutGbp;
+            const margin = o.platformMarginGbp ?? o.restaurantFeeGbp - o.driverPayoutGbp;
             const inHouse = o.dispatchType === 'own_driver';
             return (
               <View key={o.id} style={styles.gap12}>
@@ -151,14 +153,20 @@ function OverviewScreen() {
 /* ========================================================================== */
 
 function PricingScreen() {
-  const { algorithm, updateAlgorithmConfig, updateSteppedPayoutAt } = useInThaRoute();
+  const { algorithm, pricingSummary, updateAlgorithmConfig, updateSteppedPayoutAt } = useInThaRoute();
   const [size, setSize] = useState('2');
   const n = Number(size);
 
-  const restaurantsPay = n * algorithm.baseRestaurantChargeGbp;
-  const driverEarns = algorithm.steppedDriverPayoutsGbp.slice(0, n).reduce((s, v) => s + v, 0);
-  const profit = restaurantsPay - driverEarns;
-  const driverShare = restaurantsPay > 0 ? Math.min(1, driverEarns / restaurantsPay) : 0;
+  // Simulator and "you keep" figures are calculated on the server.
+  const sim = pricingSummary?.simulations.find((s) => s.orders === n);
+  const restaurantsPay = sim?.restaurantsPayGbp ?? 0;
+  const driverEarns = sim?.driverEarnsGbp ?? 0;
+  const profit = sim?.profitGbp ?? 0;
+  const driverShare = sim?.driverShare ?? 0;
+
+  useEffect(() => {
+    if (n > algorithm.maxBatchSize) setSize(String(algorithm.maxBatchSize));
+  }, [n, algorithm.maxBatchSize]);
 
   const setFee = (delta: number) =>
     updateAlgorithmConfig({
@@ -250,7 +258,10 @@ function PricingScreen() {
               <View style={styles.flexText}>
                 <Text style={styles.cardTitle}>{ORDINALS[i]} order</Text>
                 <Text style={styles.muted} numberOfLines={1}>
-                  You keep {formatGbp(algorithm.baseRestaurantChargeGbp - pay)}
+                  You keep{' '}
+                  {formatGbp(
+                    pricingSummary?.tiers[i]?.platformKeepsGbp ?? algorithm.baseRestaurantChargeGbp - pay
+                  )}
                 </Text>
               </View>
               <Stepper
@@ -271,12 +282,38 @@ function PricingScreen() {
 /* ========================================================================== */
 
 function DriversScreen() {
-  const { drivers, approveDriverKyc } = useInThaRoute();
+  const { drivers, approveDriverKyc, rejectDriverKyc } = useInThaRoute();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [photoDoc, setPhotoDoc] = useState<KycDocument | null>(null);
+
+  const approve = async (d: DriverProfile) => {
+    setBusy(`approve-${d.id}`);
+    await approveDriverKyc(d.id);
+    setBusy(null);
+  };
+
+  const reject = (d: DriverProfile) =>
+    Alert.alert(
+      `Reject ${d.name}?`,
+      'Their documents are cleared and they will be asked to upload them again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reject',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(`reject-${d.id}`);
+            await rejectDriverKyc(d.id);
+            setBusy(null);
+          },
+        },
+      ]
+    );
   const platform = drivers.filter((d) => d.driverType === 'platform_contracted');
   const inHouse = drivers.filter((d) => d.driverType === 'restaurant_own');
   const [tab, setTab] = useState<'platform' | 'inhouse'>('platform');
   const [expanded, setExpanded] = useState<string | null>(
-    platform.find((d) => d.status === 'pending_kyc')?.id ?? null
+    platform.find((d) => d.approval === 'pending')?.id ?? null
   );
 
   return (
@@ -294,7 +331,9 @@ function DriversScreen() {
         platform.map((d) => {
           const verified = d.kycDocuments.filter((k) => k.status === 'verified').length;
           const total = d.kycDocuments.length;
-          const approved = d.status === 'approved_online';
+          const approved = d.approval ? d.approval === 'approved' : d.status === 'approved_online';
+          const rejected = d.approval === 'rejected';
+          const missing = d.kycDocuments.some((k) => k.status === 'missing');
           const open = expanded === d.id;
           return (
             <Card key={d.id}>
@@ -302,7 +341,12 @@ function DriversScreen() {
                 left={<Avatar name={d.name} tone={approved ? 'success' : 'warning'} />}
                 title={d.name}
                 subtitle={`${VEHICLE_SHORT[d.vehicle]} · ${d.plateNumber}`}
-                right={<Badge label={approved ? 'Active' : 'Pending'} tone={approved ? 'success' : 'warning'} />}
+                right={
+                  <Badge
+                    label={approved ? 'Active' : rejected ? 'Rejected' : 'Pending'}
+                    tone={approved ? 'success' : rejected ? 'primary' : 'warning'}
+                  />
+                }
               />
 
               <Pressable onPress={() => setExpanded(open ? null : d.id)} style={styles.docsToggle}>
@@ -327,20 +371,54 @@ function DriversScreen() {
 
               {open &&
                 d.kycDocuments.map((doc) => (
-                  <View key={doc.id} style={styles.docRow}>
+                  <Pressable
+                    key={doc.id}
+                    style={styles.docRow}
+                    disabled={!doc.hasFile}
+                    onPress={() => setPhotoDoc(doc)}>
                     <Ionicons
-                      name={doc.status === 'verified' ? 'checkmark-circle' : 'time'}
+                      name={
+                        doc.status === 'verified'
+                          ? 'checkmark-circle'
+                          : doc.status === 'missing'
+                          ? 'close-circle'
+                          : 'time'
+                      }
                       size={18}
-                      color={doc.status === 'verified' ? C.success : C.warning}
+                      color={
+                        doc.status === 'verified' ? C.success : doc.status === 'missing' ? C.primary : C.warning
+                      }
                     />
                     <Text style={styles.docTitle} numberOfLines={1}>
                       {cleanTitle(doc.title)}
                     </Text>
-                  </View>
+                    {doc.hasFile && <Ionicons name="image-outline" size={16} color={C.ink3} />}
+                  </Pressable>
                 ))}
 
               {!approved && (
-                <Button label="Approve driver" variant="success" icon="checkmark" onPress={() => approveDriverKyc(d.id)} />
+                <View style={styles.actionRow}>
+                  {!rejected && (
+                    <Button
+                      label="Reject"
+                      variant="secondary"
+                      icon="close"
+                      loading={busy === `reject-${d.id}`}
+                      disabled={!!busy}
+                      onPress={() => reject(d)}
+                      style={styles.flex1}
+                    />
+                  )}
+                  <Button
+                    label="Approve driver"
+                    variant="success"
+                    icon="checkmark"
+                    loading={busy === `approve-${d.id}`}
+                    disabled={!!busy || missing || d.kycDocuments.length === 0}
+                    onPress={() => approve(d)}
+                    style={styles.flex2}
+                  />
+                </View>
               )}
             </Card>
           );
@@ -360,7 +438,51 @@ function DriversScreen() {
           ))}
         </Card>
       )}
+
+      <Sheet
+        visible={!!photoDoc}
+        onClose={() => setPhotoDoc(null)}
+        title={photoDoc ? cleanTitle(photoDoc.title) : ''}>
+        {photoDoc && <DocumentPhoto doc={photoDoc} />}
+      </Sheet>
     </Screen>
+  );
+}
+
+/** The photo a driver uploaded, fetched with the admin's sign-in. */
+function DocumentPhoto({ doc }: { doc: KycDocument }) {
+  const [token, setToken] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAccessToken()
+      .then((t) => !cancelled && setToken(t))
+      .catch(() => !cancelled && setFailed(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [doc.id]);
+
+  return (
+    <View style={styles.photoWrap}>
+      {failed ? (
+        <Text style={styles.muted}>The photo couldn’t be loaded.</Text>
+      ) : token ? (
+        <Image
+          style={styles.photo}
+          resizeMode="contain"
+          onError={() => setFailed(true)}
+          source={{
+            uri: `${API_URL}/api/admin/kyc-documents/${doc.id}/file`,
+            headers: { Authorization: `Bearer ${token}` },
+          }}
+        />
+      ) : (
+        <ActivityIndicator color={C.primary} />
+      )}
+      <Text style={styles.muted}>{doc.updatedAt}</Text>
+    </View>
   );
 }
 
@@ -411,6 +533,11 @@ function RestaurantsScreen() {
 
 const styles = StyleSheet.create({
   flexText: { flex: 1, minWidth: 0, gap: 4 },
+  flex1: { flex: 1 },
+  flex2: { flex: 2 },
+  actionRow: { flexDirection: 'row', gap: 10 },
+  photoWrap: { alignItems: 'center', justifyContent: 'center', gap: 10, minHeight: 200 },
+  photo: { width: '100%', height: 360, borderRadius: Brand.radius.md, backgroundColor: C.surfaceAlt },
   gap10: { gap: 10 },
   gap12: { gap: 12 },
   noPad: { padding: 0, gap: 0, overflow: 'hidden' },

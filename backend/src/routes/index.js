@@ -4,6 +4,9 @@ const db = require('../config/db');
 const router = express.Router();
 
 router.use('/auth', require('./auth.routes'));
+router.use('/restaurant', require('./restaurant.routes'));
+router.use('/driver', require('./driver.routes'));
+router.use('/admin', require('./admin.routes'));
 
 /**
  * @swagger

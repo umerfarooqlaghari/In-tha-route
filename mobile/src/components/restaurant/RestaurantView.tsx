@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LiveMap, MapPin } from '@/components/LiveMap';
 import {
@@ -27,10 +27,11 @@ import { coordsForPostcode } from '@/constants/geo';
 import {
   DriverPolicy,
   LiveOrder,
-  REAL_RECEIPT_TEMPLATES,
   ReceiptTemplate,
   useInThaRoute,
+  Vehicle,
 } from '@/context/InThaRouteContext';
+import { pickImage } from '@/utils/pickImage';
 
 const C = Brand.colors;
 
@@ -74,7 +75,7 @@ function StepProgress({ step }: { step: Step }) {
 }
 
 function NewOrderScreen() {
-  const { publishScannedOrder, drivers, restaurants, activeRestaurantId, setActiveScreen } =
+  const { publishScannedOrder, scanReceipt, orders, drivers, restaurants, activeRestaurantId, setActiveScreen } =
     useInThaRoute();
   const restaurant = restaurants.find((r) => r.id === activeRestaurantId) ?? restaurants[0];
   const ownDrivers = drivers.filter(
@@ -82,8 +83,9 @@ function NewOrderScreen() {
   );
 
   const [step, setStep] = useState<Step>('scan');
-  const [template, setTemplate] = useState<ReceiptTemplate>(REAL_RECEIPT_TEMPLATES[0]);
+  const [template, setTemplate] = useState<ReceiptTemplate | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [posting, setPosting] = useState(false);
   const [address, setAddress] = useState('');
   const [postcode, setPostcode] = useState('');
   const [accessCode, setAccessCode] = useState('');
@@ -95,30 +97,39 @@ function NewOrderScreen() {
   const [ownDriverId, setOwnDriverId] = useState<string | undefined>(ownDrivers[0]?.id);
   const [published, setPublished] = useState<LiveOrder | null>(null);
 
-  const startScan = () => {
+  // Camera ("Scan receipt") or photo library ("Upload receipt"); the server reads it with OCR.
+  const startScan = async (source: 'camera' | 'library') => {
+    const image = await pickImage(source);
+    if (!image) return;
     setScanning(true);
-    setTimeout(() => {
-      setScanning(false);
-      setAddress(template.deliveryAddress);
-      setPostcode(template.postcode);
-      setAccessCode(template.phoneAccessCode ?? '');
-      setPrep(PREP_OPTIONS.reduce((a, b) =>
-        Math.abs(b - template.suggestedPrepMinutes) < Math.abs(a - template.suggestedPrepMinutes) ? b : a
-      ));
-      setStep('confirm');
-    }, 1600);
+    const draft = await scanReceipt(image);
+    setScanning(false);
+    if (!draft) return;
+    setTemplate(draft);
+    setAddress(draft.deliveryAddress);
+    setPostcode(draft.postcode);
+    setAccessCode(draft.phoneAccessCode ?? '');
+    setPrep(PREP_OPTIONS.reduce((a, b) =>
+      Math.abs(b - draft.suggestedPrepMinutes) < Math.abs(a - draft.suggestedPrepMinutes) ? b : a
+    ));
+    setShowItems(false);
+    setStep('confirm');
   };
 
-  const post = () => {
-    const order = publishScannedOrder({
+  const post = async () => {
+    if (!template || posting) return;
+    setPosting(true);
+    const order = await publishScannedOrder({
       template,
       prepMinutes: prep,
       dispatchType: dispatch,
       ownDriverId: dispatch === 'own_driver' ? ownDriverId : undefined,
-      customAddress: address,
-      customPostcode: postcode,
-      customAccessCode: accessCode || undefined,
+      customAddress: address.trim(),
+      customPostcode: postcode.trim(),
+      customAccessCode: accessCode.trim(),
     });
+    setPosting(false);
+    if (!order) return;
     setPublished(order);
     setStep('done');
   };
@@ -126,10 +137,18 @@ function NewOrderScreen() {
   const reset = () => {
     setStep('scan');
     setPublished(null);
+    setTemplate(null);
     setShowItems(false);
   };
 
+  // Drivers load with the dashboard, so pick a default once they arrive.
+  useEffect(() => {
+    if (!ownDriverId && ownDrivers[0]) setOwnDriverId(ownDrivers[0].id);
+  }, [ownDriverId, ownDrivers]);
+
   if (step === 'done' && published) {
+    // Follow the live copy so the countdown keeps ticking.
+    const live = orders.find((o) => o.id === published.id) ?? published;
     return (
       <Screen contentStyle={styles.doneContent}>
         <View style={styles.doneIcon}>
@@ -137,23 +156,23 @@ function NewOrderScreen() {
         </View>
         <Text style={styles.doneTitle}>Order is live</Text>
         <Text style={styles.doneSubtitle} numberOfLines={2}>
-          {published.dispatchType === 'own_driver'
-            ? `Assigned to ${published.assignedDriverName}`
+          {live.dispatchType === 'own_driver'
+            ? `Assigned to ${live.assignedDriverName ?? 'your driver'}`
             : 'Nearby drivers can see it now'}
         </Text>
 
         <Card style={styles.doneCard}>
           <View style={styles.rowBetween}>
-            <SourceBadge source={published.source} />
-            <Text style={styles.mutedStrong}>{published.externalOrderId}</Text>
+            <SourceBadge source={live.source} />
+            <Text style={styles.mutedStrong}>{live.externalOrderId}</Text>
           </View>
           <Text style={styles.cardTitle} numberOfLines={1}>
-            {published.deliveryAddress}
+            {live.deliveryAddress}
           </Text>
           <Divider />
           <View style={styles.rowBetween}>
             <Text style={styles.muted}>Ready in</Text>
-            <Text style={styles.bigTimer}>{formatCountdown(published.remainingSeconds)}</Text>
+            <Text style={styles.bigTimer}>{formatCountdown(live.remainingSeconds)}</Text>
           </View>
         </Card>
 
@@ -180,31 +199,24 @@ function NewOrderScreen() {
         <>
           <Viewfinder scanning={scanning} />
 
-          <SectionLabel>Sample receipts</SectionLabel>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipRow}>
-            {REAL_RECEIPT_TEMPLATES.map((t) => (
-              <Chip
-                key={t.id}
-                label={`${t.source === 'Eat Presto POS' ? 'Eat Presto' : t.source} ${t.externalOrderId}`}
-                selected={t.id === template.id}
-                onPress={() => setTemplate(t)}
-              />
-            ))}
-          </ScrollView>
-
           <Button
             label={scanning ? 'Reading receipt…' : 'Scan receipt'}
             icon="scan"
             loading={scanning}
-            onPress={startScan}
+            disabled={scanning}
+            onPress={() => startScan('camera')}
+          />
+          <Button
+            label="Upload receipt"
+            icon="image-outline"
+            variant="secondary"
+            disabled={scanning}
+            onPress={() => startScan('library')}
           />
         </>
       )}
 
-      {step === 'confirm' && (
+      {step === 'confirm' && template && (
         <>
           <Card style={styles.noPad}>
             <LiveMap
@@ -223,16 +235,18 @@ function NewOrderScreen() {
             <View style={styles.mapFooter}>
               <SourceBadge source={template.source} />
               <Text style={styles.mutedStrong} numberOfLines={1}>
-                {template.externalOrderId} · {template.distanceMiles} mi
+                {[template.externalOrderId, template.distanceMiles ? `${template.distanceMiles} mi` : '']
+                  .filter(Boolean)
+                  .join(' · ')}
               </Text>
             </View>
           </Card>
 
           <Card>
             <ListRow
-              left={<Avatar name={template.customerName} size={36} />}
-              title={template.customerName}
-              subtitle={template.customerPhone}
+              left={<Avatar name={template.customerName || 'Customer'} size={36} />}
+              title={template.customerName || 'Customer'}
+              subtitle={template.customerPhone || '—'}
             />
             <Field label="Delivery address" value={address} onChangeText={setAddress} />
             <View style={styles.twoCol}>
@@ -278,12 +292,17 @@ function NewOrderScreen() {
 
           <View style={styles.actions}>
             <Button label="Back" variant="secondary" onPress={() => setStep('scan')} style={styles.flex1} />
-            <Button label="Continue" onPress={() => setStep('prep')} style={styles.flex2} />
+            <Button
+              label="Continue"
+              onPress={() => setStep('prep')}
+              disabled={!address.trim() || !postcode.trim()}
+              style={styles.flex2}
+            />
           </View>
         </>
       )}
 
-      {step === 'prep' && (
+      {step === 'prep' && template && (
         <>
           <Card>
             <Text style={styles.cardTitle}>Ready in</Text>
@@ -329,7 +348,7 @@ function NewOrderScreen() {
             ) : (
               <View style={styles.rowBetween}>
                 <Text style={styles.muted}>Delivery fee</Text>
-                <Text style={styles.mutedStrong}>{formatGbp(5)}</Text>
+                <Text style={styles.mutedStrong}>{formatGbp(template.estimatedFeeGbp)}</Text>
               </View>
             )}
           </Card>
@@ -340,7 +359,8 @@ function NewOrderScreen() {
               label="Post order"
               icon="send"
               onPress={post}
-              disabled={dispatch === 'own_driver' && !ownDriverId}
+              loading={posting}
+              disabled={posting || (dispatch === 'own_driver' && !ownDriverId)}
               style={styles.flex2}
             />
           </View>
@@ -525,20 +545,40 @@ function MyDriversScreen() {
   );
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
-  const [vehicle, setVehicle] = useState<(typeof VEHICLES)[number]>('Motorcycle / Scooter');
+  const [vehicle, setVehicle] = useState<Vehicle>('Motorcycle / Scooter');
   const [plate, setPlate] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const save = () => {
-    if (!name.trim()) return;
-    addRestaurantOwnDriver({
-      restaurantId: activeRestaurantId,
+  const canSave = !!name.trim() && !!email.trim() && password.length > 0 && !saving;
+
+  // The driver signs in with this email and password; no documents or approval needed.
+  const save = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    setErrors({});
+    setFormError(null);
+    const res = await addRestaurantOwnDriver({
       name: name.trim(),
-      phone: phone.trim() || '—',
+      email: email.trim(),
+      password,
+      phone: phone.trim(),
       vehicle,
       plateNumber: plate.trim(),
     });
+    setSaving(false);
+    if (!res.ok) {
+      setErrors(res.fields);
+      if (Object.keys(res.fields).length === 0) setFormError(res.message);
+      return;
+    }
     setName('');
+    setEmail('');
+    setPassword('');
     setPhone('');
     setPlate('');
     setOpen(false);
@@ -559,7 +599,9 @@ function MyDriversScreen() {
                 left={<Avatar name={d.name} tone="info" />}
                 title={d.name}
                 subtitle={`${VEHICLE_LABEL[d.vehicle]} · ${d.completedDeliveries} trips`}
-                right={<Badge label="Online" tone="success" />}
+                right={
+                  d.isOnline ? <Badge label="Online" tone="success" /> : <Badge label="Offline" />
+                }
               />
             </View>
           ))
@@ -569,8 +611,43 @@ function MyDriversScreen() {
       <Button label="Add driver" icon="person-add-outline" variant="dark" onPress={() => setOpen(true)} />
 
       <Sheet visible={open} onClose={() => setOpen(false)} title="Add driver">
-        <Field label="Full name" value={name} onChangeText={setName} placeholder="e.g. Sam Patel" />
-        <Field label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="07…" />
+        <Field
+          label="Full name"
+          value={name}
+          onChangeText={setName}
+          placeholder="e.g. Sam Patel"
+          error={errors.fullName}
+        />
+        <Field
+          label="Email (for login)"
+          value={email}
+          onChangeText={setEmail}
+          placeholder="sam@example.com"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="emailAddress"
+          error={errors.email}
+        />
+        <Field
+          label="Password"
+          value={password}
+          onChangeText={setPassword}
+          placeholder="At least 8 characters"
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="newPassword"
+          error={errors.password}
+        />
+        <Field
+          label="Phone"
+          value={phone}
+          onChangeText={setPhone}
+          keyboardType="phone-pad"
+          placeholder="07…"
+          error={errors.phone}
+        />
         <View style={styles.gap8}>
           <Text style={styles.fieldLabel}>Vehicle</Text>
           <View style={styles.wrapRow}>
@@ -579,8 +656,15 @@ function MyDriversScreen() {
             ))}
           </View>
         </View>
-        <Field label="Plate (optional)" value={plate} onChangeText={setPlate} autoCapitalize="characters" />
-        <Button label="Add driver" onPress={save} disabled={!name.trim()} />
+        <Field
+          label="Plate (optional)"
+          value={plate}
+          onChangeText={setPlate}
+          autoCapitalize="characters"
+          error={errors.plateNumber}
+        />
+        {formError ? <Hint icon="alert-circle-outline">{formError}</Hint> : null}
+        <Button label="Add driver" onPress={save} loading={saving} disabled={!canSave} />
       </Sheet>
     </Screen>
   );
@@ -602,7 +686,7 @@ const POLICIES: {
 ];
 
 function DeliverySettingsScreen() {
-  const { restaurants, activeRestaurantId, updateRestaurantPolicy } = useInThaRoute();
+  const { restaurants, activeRestaurantId, updateRestaurantPolicy, algorithm } = useInThaRoute();
   const restaurant = restaurants.find((r) => r.id === activeRestaurantId) ?? restaurants[0];
 
   return (
@@ -639,7 +723,7 @@ function DeliverySettingsScreen() {
           left={<IconTile icon="card-outline" size={36} />}
           title="Platform delivery"
           subtitle="Per order"
-          right={<Text style={styles.cardTitle}>{formatGbp(5)}</Text>}
+          right={<Text style={styles.cardTitle}>{formatGbp(algorithm.baseRestaurantChargeGbp)}</Text>}
         />
         <Divider />
         <ListRow

@@ -18,7 +18,12 @@ app.set('trust proxy', 1);
 // Middleware
 app.use(helmet());
 app.use(cors());
-app.use(express.json({ limit: '100kb' }));
+// Photo uploads (receipts, driver documents) arrive as base64 JSON and need more room.
+const smallJson = express.json({ limit: '100kb' });
+const photoJson = express.json({ limit: '12mb' });
+app.use((req, res, next) =>
+  (/\/(receipts\/scan|documents\/[^/]+\/upload)$/.test(req.path) ? photoJson : smallJson)(req, res, next)
+);
 app.use(express.urlencoded({ extended: true }));
 
 // Swagger setup (development only)

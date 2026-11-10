@@ -4,6 +4,7 @@ const AppError = require('../utils/AppError');
 const { hashPassword, verifyPassword, DUMMY_HASH } = require('./password.service');
 const tokens = require('./token.service');
 const users = require('./user.service');
+const kyc = require('./kyc.service');
 
 const UNIQUE_VIOLATION = '23505';
 
@@ -29,11 +30,12 @@ async function signup(data) {
     } else if (data.role === ROLES.DRIVER) {
       // Type and status are fixed here: self-registered drivers are platform
       // drivers awaiting KYC, whatever the request body says.
-      await client.query(
+      const profile = await client.query(
         `INSERT INTO driver_profiles (user_id, driver_type, vehicle, plate_number, status)
-         VALUES ($1, 'platform_contracted', $2, $3, 'pending_kyc')`,
+         VALUES ($1, 'platform_contracted', $2, $3, 'pending_kyc') RETURNING id`,
         [userId, data.vehicle, data.plateNumber || null]
       );
+      await kyc.createSlots(profile.rows[0].id, client);
     }
 
     const user = await users.findById(userId, client);

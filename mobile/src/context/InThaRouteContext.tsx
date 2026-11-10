@@ -1,19 +1,25 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, AppState } from 'react-native';
 
+import { LatLng, registerPostcodeCoords } from '@/constants/geo';
+import { ApiError, AuthSession, AuthUser, logoutRequest } from '@/services/authApi';
 import {
-  ApiError,
-  AuthSession,
-  AuthUser,
-  logoutRequest,
-  refreshRequest,
-} from '@/services/authApi';
+  api,
+  configureApiClient,
+  currentRefreshToken,
+  refreshSession,
+  setApiSession,
+} from '@/services/apiClient';
 import { clearSession, loadSession, saveSession } from '@/services/sessionStore';
+import type { PickedImage } from '@/utils/pickImage';
 
 export type UserRole = 'restaurant' | 'driver' | 'admin';
 
-export type OrderSource = 'Deliveroo' | 'Uber Eats' | 'Eat Presto POS' | 'Just Eat';
+export type OrderSource = 'Deliveroo' | 'Uber Eats' | 'Eat Presto POS' | 'Just Eat' | 'Other';
 
 export type DriverPolicy = 'open_platform' | 'own_drivers' | 'hybrid';
+
+export type Vehicle = 'Motorcycle / Scooter' | 'Car' | 'E-Bike';
 
 export interface OrderItem {
   quantity: number;
@@ -21,6 +27,7 @@ export interface OrderItem {
   price: number;
 }
 
+/** A receipt read by OCR on the server: a draft order the staff check before posting. */
 export interface ReceiptTemplate {
   id: string;
   source: OrderSource;
@@ -42,6 +49,10 @@ export interface ReceiptTemplate {
   printedTime: string;
   orderTotalGbp: number;
   items: OrderItem[];
+  /** What the restaurant will be charged for a platform driver. */
+  estimatedFeeGbp: number;
+  pickupCoords?: LatLng | null;
+  dropoffCoords?: LatLng | null;
   mapCoords: {
     pickupX: number;
     pickupY: number;
@@ -66,6 +77,8 @@ export interface LiveOrder {
   restaurantName: string;
   restaurantAddress: string;
   restaurantPostcode: string;
+  /** Only sent to drivers and admins. */
+  restaurantPhone?: string;
   customerName: string;
   customerPhone: string;
   phoneAccessCode?: string;
@@ -76,6 +89,8 @@ export interface LiveOrder {
   restaurantPickupNote: string;
   distanceMiles: number;
   prepMinutes: number;
+  readyAt?: string;
+  /** Counts down locally between refreshes. */
   remainingSeconds: number;
   orderTotalGbp: number;
   items: OrderItem[];
@@ -87,7 +102,13 @@ export interface LiveOrder {
   batchPosition?: number;
   restaurantFeeGbp: number;
   driverPayoutGbp: number;
+  /** Admin only. */
+  platformMarginGbp?: number;
+  /** Order pool only: what this order would pay the driver if added now. */
+  nextPayoutGbp?: number;
   createdAtLabel: string;
+  pickupCoords?: LatLng | null;
+  dropoffCoords?: LatLng | null;
   mapCoords: {
     pickupX: number;
     pickupY: number;
@@ -98,11 +119,13 @@ export interface LiveOrder {
 
 export interface KycDocument {
   id: string;
+  type?: string;
   title: string;
   subtitle: string;
   value: string;
   status: 'verified' | 'pending' | 'missing';
   updatedAt: string;
+  hasFile?: boolean;
 }
 
 export interface DriverProfile {
@@ -113,9 +136,11 @@ export interface DriverProfile {
   driverType: 'platform_contracted' | 'restaurant_own';
   employerRestaurantId?: string;
   employerRestaurantName?: string;
-  vehicle: 'Motorcycle / Scooter' | 'Car' | 'E-Bike';
+  vehicle: Vehicle;
   plateNumber: string;
   status: 'approved_online' | 'pending_kyc' | 'offline';
+  approval?: 'approved' | 'rejected' | 'pending';
+  isOnline?: boolean;
   rating: number;
   completedDeliveries: number;
   niNumber?: string;
@@ -133,6 +158,7 @@ export interface RestaurantPartner {
   activeOrdersCount: number;
   completedTodayCount: number;
   pickupSafetyNote: string;
+  coords?: LatLng | null;
 }
 
 export interface AlgorithmConfig {
@@ -146,443 +172,52 @@ export interface AlgorithmConfig {
   maxPickupRadiusMiles: number;
 }
 
-export const REAL_RECEIPT_TEMPLATES: ReceiptTemplate[] = [
-  {
-    id: 'rcpt-deliveroo-8680',
-    source: 'Deliveroo',
-    externalOrderId: '#8680',
-    restaurantId: 'rest-saffron',
-    restaurantName: 'Saffron Restaurant - Richmond',
-    restaurantAddress: '5 Dome Buildings The Square',
-    restaurantPostcode: 'TW9 1DT',
-    customerName: 'Anna T.',
-    customerPhone: '+442033195035',
-    phoneAccessCode: '001902799',
-    deliveryAddress: '19 Rosemont Rd, Richmond, London',
-    postcode: 'TW10 6QN',
-    deliveryInstructions: 'ADD CUTLERY • Phone access code: 001902799',
-    restaurantPickupNote:
-      'Please collect from stool ONLY when staff member inside is 2 metres distance away behind the counter.',
-    distanceMiles: 1.6,
-    suggestedPrepMinutes: 20,
-    printedTime: '18:15',
-    orderTotalGbp: 51.25,
-    items: [
-      { quantity: 1, name: 'Papad Basket and Pickle Tray', price: 6.0 },
-      { quantity: 1, name: 'Spinach and Kale Bhajiyas', price: 7.5 },
-      { quantity: 1, name: 'Garlic Naan', price: 4.25 },
-      { quantity: 1, name: 'Pulao Rice', price: 5.0 },
-      { quantity: 1, name: 'Lamb Biryani', price: 15.0 },
-      { quantity: 1, name: 'Mild Butter Chicken', price: 13.5 },
-    ],
-    mapCoords: { pickupX: 285, pickupY: 130, dropoffX: 195, dropoffY: 175 },
-  },
-  {
-    id: 'rcpt-ubereats-79067',
-    source: 'Uber Eats',
-    externalOrderId: '#79067',
-    restaurantId: 'rest-saffron',
-    restaurantName: 'Saffron Restaurant - Richmond',
-    restaurantAddress: '5 Dome Buildings The Square',
-    restaurantPostcode: 'TW9 1DT',
-    customerName: 'Shalini L.',
-    customerPhone: '+441388436844',
-    phoneAccessCode: '215 97 271',
-    directCustomerPhone: '07919077221',
-    deliveryAddress: '7 Yeoman Villa Apartments, 2 Bradshaw Close, Twickenham',
-    postcode: 'TW1 1FF',
-    deliveryInstructions:
-      'Use the intercom at Yeoman Villa entrance for flat number 7. Direct phone: 07919077221',
-    restaurantPickupNote: 'Ask counter for Uber Eats thermal bag #79067.',
-    distanceMiles: 1.5,
-    suggestedPrepMinutes: 15,
-    printedTime: '17:34',
-    orderTotalGbp: 28.5,
-    items: [
-      { quantity: 1, name: 'Kathal Ki Sabzi', price: 13.0 },
-      { quantity: 1, name: 'Channa Paapdi Chaat', price: 7.0 },
-      { quantity: 1, name: 'Dal Makhani', price: 8.5 },
-    ],
-    mapCoords: { pickupX: 285, pickupY: 130, dropoffX: 135, dropoffY: 162 },
-  },
-  {
-    id: 'rcpt-eatpresto-65601',
-    source: 'Eat Presto POS',
-    externalOrderId: 'WRZMC65601',
-    restaurantId: 'rest-eatpresto',
-    restaurantName: 'Eat Presto - Isleworth',
-    restaurantAddress: '14 South Street, Isleworth',
-    restaurantPostcode: 'TW7 7BG',
-    customerName: 'Manu Sareen',
-    customerPhone: '07766886124',
-    deliveryAddress: "68 Saint Mary's Crescent, Isleworth",
-    postcode: 'TW7 4NA',
-    deliveryInstructions: 'Prepare by 6:55 pm (40min) • Zone A05 • Paid Online',
-    restaurantPickupNote: 'Collect from hot shelf A05 — verify order WRZMC65601.',
-    distanceMiles: 1.9,
-    suggestedPrepMinutes: 40,
-    printedTime: '18:15',
-    orderTotalGbp: 90.0,
-    items: [
-      { quantity: 1, name: 'Machi Pakora (Starter)', price: 8.5 },
-      { quantity: 1, name: 'Papad Basket & Chutneys (VEGAN)', price: 6.0 },
-      { quantity: 2, name: 'Channa Papdi Chaat (G)(D)(V)', price: 14.0 },
-      { quantity: 1, name: 'Lamb Biryani (D)', price: 16.5 },
-      { quantity: 1, name: 'Jackfruit, Artichoke & Snowpeas Biryani', price: 15.0 },
-      { quantity: 2, name: 'Chicken Tikka Biryani (D)', price: 30.0 },
-    ],
-    mapCoords: { pickupX: 215, pickupY: 95, dropoffX: 110, dropoffY: 115 },
-  },
-  {
-    id: 'rcpt-deliveroo-9555',
-    source: 'Deliveroo',
-    externalOrderId: '#9555',
-    restaurantId: 'rest-amorino',
-    restaurantName: 'Amorino - Richmond',
-    restaurantAddress: '5 The Quadrant, Richmond',
-    restaurantPostcode: 'TW9 1BP',
-    customerName: 'Vijay B.',
-    customerPhone: '+442033195035',
-    phoneAccessCode: '224227568',
-    deliveryAddress: '50 Gladstone Avenue, Twickenham',
-    postcode: 'TW2 7PR',
-    deliveryInstructions: 'Ring the doorbell • ADD CUTLERY • Access code: 224227568',
-    restaurantPickupNote:
-      'Please collect from stool ONLY when staff member inside is 2 metres distance away behind the counter. Thank you and stay safe!',
-    distanceMiles: 2.0,
-    suggestedPrepMinutes: 12,
-    printedTime: '21:22',
-    orderTotalGbp: 29.75,
-    items: [
-      { quantity: 1, name: 'DS Aloo Tikki Chaat', price: 8.5 },
-      { quantity: 1, name: 'Chicken Lollipop', price: 9.5 },
-      { quantity: 1, name: 'Garlic Naan', price: 4.25 },
-      { quantity: 1, name: 'Lassoni Palak', price: 7.5 },
-    ],
-    mapCoords: { pickupX: 270, pickupY: 118, dropoffX: 85, dropoffY: 140 },
-  },
-];
+export interface DriverEarnings {
+  week: { day: string; value: number }[];
+  totalGbp: number;
+  trips: number;
+  onlineHours: number;
+  rating: number;
+  recentTrips: { id: string; title: string; time: string; pay: number }[];
+}
 
-const INITIAL_ALGORITHM: AlgorithmConfig = {
-  baseDistanceMiles: 2.0,
-  baseRestaurantChargeGbp: 5.0,
-  extraMileRestaurantChargeGbp: 1.25,
-  extraMileDriverPayoutGbp: 0.9,
-  maxBatchSize: 5,
-  steppedDriverPayoutsGbp: [4.0, 3.2, 2.8, 2.5, 2.2, 2.0, 1.9, 1.8],
-  maxPrepTimeWindowMinutes: 15,
-  maxPickupRadiusMiles: 0.8,
-};
+/** Admin pricing screen figures, calculated by the server. */
+export interface PricingSummary {
+  tiers: { position: number; driverPayGbp: number; platformKeepsGbp: number }[];
+  simulations: {
+    orders: number;
+    restaurantsPayGbp: number;
+    driverEarnsGbp: number;
+    profitGbp: number;
+    driverShare: number;
+  }[];
+}
 
-const INITIAL_RESTAURANTS: RestaurantPartner[] = [
-  {
-    id: 'rest-saffron',
-    name: 'Saffron Restaurant - Richmond',
-    address: '5 Dome Buildings The Square, Richmond',
-    postcode: 'TW9 1DT',
-    phone: '+44 20 8940 5521',
-    driverPolicy: 'hybrid',
-    activeOrdersCount: 2,
-    completedTodayCount: 18,
-    pickupSafetyNote:
-      'Collect from designated courier counter. Keep 2m distance from kitchen pass.',
-  },
-  {
-    id: 'rest-amorino',
-    name: 'Amorino - Richmond',
-    address: '5 The Quadrant, Richmond',
-    postcode: 'TW9 1BP',
-    phone: '+44 20 8332 1920',
-    driverPolicy: 'open_platform',
-    activeOrdersCount: 1,
-    completedTodayCount: 14,
-    pickupSafetyNote:
-      'Please collect from stool ONLY when staff member inside is 2 metres distance away behind the counter. Thank you and stay safe!',
-  },
-  {
-    id: 'rest-eatpresto',
-    name: 'Eat Presto - Isleworth',
-    address: '14 South Street, Isleworth',
-    postcode: 'TW7 7BG',
-    phone: '+44 20 8560 8810',
-    driverPolicy: 'open_platform',
-    activeOrdersCount: 1,
-    completedTodayCount: 11,
-    pickupSafetyNote: 'Quote POS Order Reference (WRZ/FZW) at pickup window.',
-  },
-];
+export interface AdminTotals {
+  billedGbp: number;
+  driverPayGbp: number;
+  profitGbp: number;
+}
 
-const INITIAL_DRIVERS: DriverProfile[] = [
-  {
-    id: 'drv-gustavo',
-    name: 'Gustavo Oliveira',
-    email: 'gustavo.rider@intharoute.co.uk',
-    phone: '+44 7841 902145',
-    driverType: 'platform_contracted',
-    vehicle: 'Motorcycle / Scooter',
-    plateNumber: 'LR23 KXM',
-    status: 'approved_online',
-    rating: 4.96,
-    completedDeliveries: 412,
-    niNumber: 'QQ 48 91 22 C',
-    bankAccount: 'Barclays • 20-71-04 • ••••8821',
-    kycDocuments: [
-      {
-        id: 'doc-1',
-        title: 'UK Driving Licence (Photocard)',
-        subtitle: 'DVLA Full CBT / A2 Category verified',
-        value: 'OLIVE904182GX9IJ',
-        status: 'verified',
-        updatedAt: 'Verified Oct 12',
-      },
-      {
-        id: 'doc-2',
-        title: 'National Insurance (NI) Number',
-        subtitle: 'HMRC Self-Employed Courier Tax Check',
-        value: 'QQ 48 91 22 C',
-        status: 'verified',
-        updatedAt: 'Verified Oct 12',
-      },
-      {
-        id: 'doc-3',
-        title: 'UK Bank Account & Sort Code',
-        subtitle: 'Faster Payments Weekly Settlement',
-        value: 'Sort: 20-71-04 • Acc: ••••8821',
-        status: 'verified',
-        updatedAt: 'Verified Oct 12',
-      },
-      {
-        id: 'doc-4',
-        title: 'Hire & Reward Vehicle Insurance',
-        subtitle: 'Zego Commercial Food Delivery Policy',
-        value: 'Policy #ZG-9948120-UK',
-        status: 'verified',
-        updatedAt: 'Verified Oct 14',
-      },
-      {
-        id: 'doc-5',
-        title: 'Personal & Right-to-Work ID',
-        subtitle: 'Passport & Biometric Residence Permit',
-        value: 'UK Right to Work Share Code Verified',
-        status: 'verified',
-        updatedAt: 'Verified Oct 12',
-      },
-    ],
-  },
-  {
-    id: 'drv-tariq',
-    name: 'Tariq Mahmood',
-    email: 'tariq.m@intharoute.co.uk',
-    phone: '+44 7912 330871',
-    driverType: 'platform_contracted',
-    vehicle: 'Car',
-    plateNumber: 'LV21 TPF',
-    status: 'pending_kyc',
-    rating: 4.89,
-    completedDeliveries: 0,
-    niNumber: 'JN 83 10 44 A',
-    bankAccount: 'Monzo • 04-00-04 • ••••3109',
-    kycDocuments: [
-      {
-        id: 'doc-t1',
-        title: 'UK Driving Licence (Photocard)',
-        subtitle: 'Category B Full UK Licence',
-        value: 'MAHMO881023TM9AB',
-        status: 'verified',
-        updatedAt: 'Uploaded Today',
-      },
-      {
-        id: 'doc-t2',
-        title: 'National Insurance (NI) Number',
-        subtitle: 'HMRC National Insurance Verification',
-        value: 'JN 83 10 44 A',
-        status: 'pending',
-        updatedAt: 'Pending Admin Review',
-      },
-      {
-        id: 'doc-t3',
-        title: 'UK Bank Account & Sort Code',
-        subtitle: 'Monzo Bank UK Direct Payout',
-        value: 'Sort: 04-00-04 • Acc: 99203109',
-        status: 'verified',
-        updatedAt: 'Uploaded Today',
-      },
-      {
-        id: 'doc-t4',
-        title: 'Hire & Reward Vehicle Insurance',
-        subtitle: 'Inshur Courier Certificate PDF',
-        value: 'Policy #INSH-772019-UK',
-        status: 'pending',
-        updatedAt: 'Pending Admin Review',
-      },
-      {
-        id: 'doc-t5',
-        title: 'Personal & Company Identity Document',
-        subtitle: 'UK Passport Scan',
-        value: 'Passport #549201823',
-        status: 'verified',
-        updatedAt: 'Uploaded Today',
-      },
-    ],
-  },
-  {
-    id: 'drv-carlos-own',
-    name: 'Carlos Silva',
-    email: 'carlos@saffronrichmond.co.uk',
-    phone: '+44 7700 900412',
-    driverType: 'restaurant_own',
-    employerRestaurantId: 'rest-saffron',
-    employerRestaurantName: 'Saffron Restaurant - Richmond',
-    vehicle: 'Motorcycle / Scooter',
-    plateNumber: 'In-House Fleet #1',
-    status: 'approved_online',
-    rating: 5.0,
-    completedDeliveries: 164,
-    kycDocuments: [],
-  },
-];
+type BatchStatus = 'offered' | 'accepted_navigating' | 'declined';
 
-const INITIAL_ORDERS: LiveOrder[] = [
-  {
-    id: 'ord-batch-1',
-    source: 'Deliveroo',
-    externalOrderId: '#9555',
-    restaurantId: 'rest-amorino',
-    restaurantName: 'Amorino - Richmond',
-    restaurantAddress: '5 The Quadrant, TW9 1BP',
-    restaurantPostcode: 'TW9 1BP',
-    customerName: 'Horatio Court Customer',
-    customerPhone: '+442033195035',
-    phoneAccessCode: '676167170',
-    deliveryAddress: '6 Hounslow Road, 2 Horatio Court',
-    postcode: 'TW2 7EX',
-    deliveryInstructions: 'Phone access code: 676167170 • Leave at flat door',
-    restaurantPickupNote:
-      'Please collect from stool ONLY when staff member inside is 2 metres distance away behind the counter. Thank you and stay safe!',
-    distanceMiles: 1.4,
-    prepMinutes: 12,
-    remainingSeconds: 265,
-    orderTotalGbp: 34.5,
-    items: [
-      { quantity: 1, name: 'Signature Gelato Box (Large)', price: 18.5 },
-      { quantity: 4, name: 'Artisanal Macarons Assortment', price: 16.0 },
-    ],
-    dispatchType: 'open_platform',
-    status: 'batched_offered',
-    assignedDriverId: 'drv-gustavo',
-    assignedDriverName: 'Gustavo Oliveira',
-    batchId: 'BATCH-RICHMOND-01',
-    batchPosition: 1,
-    restaurantFeeGbp: 5.0,
-    driverPayoutGbp: 4.0,
-    createdAtLabel: 'Just now',
-    mapCoords: { pickupX: 270, pickupY: 118, dropoffX: 78, dropoffY: 132 },
-  },
-  {
-    id: 'ord-batch-2',
-    source: 'Deliveroo',
-    externalOrderId: '#8680',
-    restaurantId: 'rest-saffron',
-    restaurantName: 'Saffron Restaurant - Richmond',
-    restaurantAddress: '5 Dome Buildings The Square, TW9 1DT',
-    restaurantPostcode: 'TW9 1DT',
-    customerName: 'Anna T.',
-    customerPhone: '+442033195035',
-    phoneAccessCode: '001902799',
-    deliveryAddress: '7 Yew Tree Walk, Hounslow',
-    postcode: 'TW4 5HT',
-    deliveryInstructions: 'ADD CUTLERY • Phone access code: 001902799',
-    restaurantPickupNote:
-      'Please collect from stool ONLY when staff member inside is 2 metres distance away behind the counter.',
-    distanceMiles: 1.8,
-    prepMinutes: 15,
-    remainingSeconds: 490,
-    orderTotalGbp: 51.25,
-    items: [
-      { quantity: 1, name: 'Papad Basket and Pickle Tray', price: 6.0 },
-      { quantity: 1, name: 'Spinach and Kale Bhajiyas', price: 7.5 },
-      { quantity: 1, name: 'Garlic Naan', price: 4.25 },
-      { quantity: 1, name: 'Pulao Rice', price: 5.0 },
-      { quantity: 1, name: 'Lamb Biryani', price: 15.0 },
-      { quantity: 1, name: 'Mild Butter Chicken', price: 13.5 },
-    ],
-    dispatchType: 'open_platform',
-    status: 'batched_offered',
-    assignedDriverId: 'drv-gustavo',
-    assignedDriverName: 'Gustavo Oliveira',
-    batchId: 'BATCH-RICHMOND-01',
-    batchPosition: 2,
-    restaurantFeeGbp: 5.0,
-    driverPayoutGbp: 3.2,
-    createdAtLabel: '1 min ago',
-    mapCoords: { pickupX: 285, pickupY: 130, dropoffX: 138, dropoffY: 168 },
-  },
-  {
-    id: 'ord-open-3',
-    source: 'Uber Eats',
-    externalOrderId: '#3B274',
-    restaurantId: 'rest-saffron',
-    restaurantName: 'Saffron Restaurant - Richmond',
-    restaurantAddress: '5 Dome Buildings The Square, TW9 1DT',
-    restaurantPostcode: 'TW9 1DT',
-    customerName: 'Steve J.',
-    customerPhone: '+441388436844',
-    phoneAccessCode: '885 20 125',
-    deliveryAddress: '8 Albert Rd, Twickenham',
-    postcode: 'TW1 4HU',
-    deliveryInstructions: 'New customer • Uber Eats PIN #885 20 125',
-    restaurantPickupNote: 'Thermal bag sealed at counter #2.',
-    distanceMiles: 1.5,
-    prepMinutes: 18,
-    remainingSeconds: 640,
-    orderTotalGbp: 62.65,
-    items: [
-      { quantity: 1, name: 'Channa Paapdi Chaat', price: 7.0 },
-      { quantity: 1, name: 'Spinach and Kale Bhajiyas', price: 7.5 },
-      { quantity: 2, name: 'Naan (2 @ £3.95)', price: 7.9 },
-      { quantity: 1, name: 'Methi Murg', price: 13.5 },
-      { quantity: 1, name: 'Lamb Rogan Josh', price: 15.75 },
-    ],
-    dispatchType: 'open_platform',
-    status: 'preparing',
-    restaurantFeeGbp: 5.0,
-    driverPayoutGbp: 4.0,
-    createdAtLabel: '2 mins ago',
-    mapCoords: { pickupX: 285, pickupY: 130, dropoffX: 165, dropoffY: 185 },
-  },
-  {
-    id: 'ord-open-4',
-    source: 'Eat Presto POS',
-    externalOrderId: 'FZWVW63353',
-    restaurantId: 'rest-eatpresto',
-    restaurantName: 'Eat Presto - Isleworth',
-    restaurantAddress: '14 South Street, Isleworth',
-    restaurantPostcode: 'TW7 7BG',
-    customerName: 'Georgina Dumler',
-    customerPhone: '07906062965',
-    deliveryAddress: '38 Shaef Way, Teddington',
-    postcode: 'TW11 0DQ',
-    deliveryInstructions: 'Prepare by 6:30 pm (51min) A02 • Direct Tel: 07906062965',
-    restaurantPickupNote: 'Collect from shelf A02.',
-    distanceMiles: 2.0,
-    prepMinutes: 25,
-    remainingSeconds: 890,
-    orderTotalGbp: 50.0,
-    items: [
-      { quantity: 1, name: 'Veg Punjabi Samosa (2pc) (VEGAN)', price: 6.5 },
-      { quantity: 1, name: 'Tamil Nadu Chicken', price: 15.5 },
-      { quantity: 1, name: 'Small Aloo Gobi (VEGAN)', price: 9.5 },
-      { quantity: 1, name: 'Pork Vindaloo', price: 15.0 },
-      { quantity: 1, name: 'Roti (Plain) (VEGAN)', price: 3.5 },
-    ],
-    dispatchType: 'open_platform',
-    status: 'preparing',
-    restaurantFeeGbp: 5.0,
-    driverPayoutGbp: 4.0,
-    createdAtLabel: '4 mins ago',
-    mapCoords: { pickupX: 215, pickupY: 95, dropoffX: 190, dropoffY: 205 },
-  },
-];
+/** What `GET /api/{role}/dashboard` returns. Every change endpoint returns a fresh one too. */
+interface Dashboard {
+  role: UserRole;
+  orders: LiveOrder[];
+  drivers: DriverProfile[];
+  restaurants: RestaurantPartner[];
+  algorithm: AlgorithmConfig;
+  activeRestaurantId?: string;
+  me?: DriverProfile;
+  currentBatchId?: string | null;
+  driverBatchStatus?: BatchStatus;
+  activeStopIndex?: number;
+  isOnline?: boolean;
+  earnings?: DriverEarnings;
+  pricingSummary?: PricingSummary;
+  totals?: AdminTotals;
+}
 
 export interface RoleScreen {
   key: string;
@@ -612,6 +247,42 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
   ],
 };
 
+/** Shown until the first dashboard arrives; the server's values replace it. */
+const DEFAULT_ALGORITHM: AlgorithmConfig = {
+  baseDistanceMiles: 2.0,
+  baseRestaurantChargeGbp: 5.0,
+  extraMileRestaurantChargeGbp: 1.25,
+  extraMileDriverPayoutGbp: 0.9,
+  maxBatchSize: 5,
+  steppedDriverPayoutsGbp: [4.0, 3.2, 2.8, 2.5, 2.2, 2.0, 1.9, 1.8],
+  maxPrepTimeWindowMinutes: 15,
+  maxPickupRadiusMiles: 0.8,
+};
+
+const POLL_MS = 12_000;
+
+/** A message the user can act on, preferring the first field error. */
+export function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    const first = Object.values(err.fields)[0];
+    return first ?? err.message;
+  }
+  return 'Something went wrong. Please try again.';
+}
+
+const showError = (err: unknown, title = 'Couldn’t complete that') => Alert.alert(title, errorMessage(err));
+
+/** Remember real coordinates the server sent, so map pins land in the right place. */
+function registerCoords(d: Dashboard) {
+  d.restaurants.forEach((r) => registerPostcodeCoords(r.postcode, r.coords));
+  d.orders.forEach((o) => {
+    registerPostcodeCoords(o.restaurantPostcode, o.pickupCoords);
+    registerPostcodeCoords(o.postcode, o.dropoffCoords);
+  });
+}
+
+type AddDriverResult = { ok: true } | { ok: false; message: string; fields: Record<string, string> };
+
 interface InThaRouteContextType {
   /** True while the saved session is being read on launch. */
   isRestoring: boolean;
@@ -619,24 +290,44 @@ interface InThaRouteContextType {
   role: UserRole;
   activeScreen: string;
   setActiveScreen: (screen: string) => void;
+  /** Screens this account may open (a driver awaiting approval only sees Documents). */
+  screens: RoleScreen[];
   /** The signed-in account, as returned by the API. */
   user: AuthUser | null;
   /** Enter the app with a session from the signup or login API. */
   signIn: (session: AuthSession) => void;
   logout: () => void;
+
+  /** True once the first dashboard for this account has loaded. */
+  isDashboardReady: boolean;
+  dashboardError: string | null;
+  refreshDashboard: () => Promise<void>;
+
   orders: LiveOrder[];
   drivers: DriverProfile[];
   restaurants: RestaurantPartner[];
   algorithm: AlgorithmConfig;
   activeRestaurantId: string;
   setActiveRestaurantId: (id: string) => void;
-  driverBatchStatus: 'offered' | 'accepted_navigating' | 'declined';
+
+  // Driver
+  me: DriverProfile | null;
+  isOnline: boolean;
+  setOnline: (online: boolean) => Promise<boolean>;
+  earnings: DriverEarnings | null;
+  currentBatchId: string | null;
+  driverBatchStatus: BatchStatus;
   activeStopIndex: number;
-  acceptCurrentBatch: () => void;
-  declineCurrentBatch: () => void;
-  advanceActiveStop: () => void;
-  resetDemoBatchOffer: () => void;
-  appendOrderToDriverBatch: (orderId: string) => { ok: boolean; message: string };
+  acceptCurrentBatch: () => Promise<boolean>;
+  declineCurrentBatch: () => Promise<boolean>;
+  advanceActiveStop: () => Promise<boolean>;
+  /** "Find new orders" / "Refresh": closes a finished run and asks for the next offer. */
+  findNewOrders: () => Promise<boolean>;
+  appendOrderToDriverBatch: (orderId: string) => Promise<{ ok: boolean; message: string }>;
+  uploadDriverKycDoc: (docId: string, image: PickedImage) => Promise<boolean>;
+
+  // Restaurant
+  scanReceipt: (image: PickedImage) => Promise<ReceiptTemplate | null>;
   publishScannedOrder: (params: {
     template: ReceiptTemplate;
     prepMinutes: number;
@@ -645,72 +336,92 @@ interface InThaRouteContextType {
     customAddress?: string;
     customPostcode?: string;
     customAccessCode?: string;
-    autoBatchWithActive?: boolean;
-  }) => LiveOrder;
-  markOrderReady: (orderId: string) => void;
+  }) => Promise<LiveOrder | null>;
+  markOrderReady: (orderId: string) => Promise<boolean>;
   addRestaurantOwnDriver: (params: {
-    restaurantId: string;
     name: string;
+    email: string;
+    password: string;
     phone: string;
-    vehicle: 'Motorcycle / Scooter' | 'Car' | 'E-Bike';
+    vehicle: Vehicle;
     plateNumber: string;
-  }) => void;
-  updateRestaurantPolicy: (restaurantId: string, policy: DriverPolicy) => void;
-  uploadDriverKycDoc: (driverId: string, docId: string, newValue: string) => void;
-  approveDriverKyc: (driverId: string) => void;
-  updateAlgorithmConfig: (partial: Partial<AlgorithmConfig>) => void;
-  updateSteppedPayoutAt: (orderPositionIndex: number, amountGbp: number) => void;
-  calculateOrderFinancials: (
-    distanceMiles: number,
-    batchPosition: number,
-    dispatchType: 'open_platform' | 'own_driver'
-  ) => { restaurantFeeGbp: number; driverPayoutGbp: number; platformMarginGbp: number };
+  }) => Promise<AddDriverResult>;
+  updateRestaurantPolicy: (restaurantId: string, policy: DriverPolicy) => Promise<boolean>;
+
+  // Admin
+  pricingSummary: PricingSummary | null;
+  totals: AdminTotals | null;
+  approveDriverKyc: (driverId: string) => Promise<boolean>;
+  rejectDriverKyc: (driverId: string, reason?: string) => Promise<boolean>;
+  updateAlgorithmConfig: (partial: Partial<AlgorithmConfig>) => Promise<boolean>;
+  updateSteppedPayoutAt: (orderPositionIndex: number, amountGbp: number) => Promise<boolean>;
 }
 
 const InThaRouteContext = createContext<InThaRouteContextType | undefined>(undefined);
+
+interface DashboardState {
+  data: Dashboard | null;
+  /** When `data` arrived, so countdowns keep ticking between refreshes. */
+  receivedAt: number;
+}
+
+const EMPTY: DashboardState = { data: null, receivedAt: 0 };
 
 export function InThaRouteProvider({ children }: { children: React.ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [isRestoring, setIsRestoring] = useState<boolean>(true);
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [role, setRoleState] = useState<UserRole>('restaurant');
   const [activeScreen, setActiveScreen] = useState<string>('scan_receipt');
-  const [orders, setOrders] = useState<LiveOrder[]>(INITIAL_ORDERS);
-  const [drivers, setDrivers] = useState<DriverProfile[]>(INITIAL_DRIVERS);
-  const [restaurants, setRestaurants] = useState<RestaurantPartner[]>(INITIAL_RESTAURANTS);
-  const [algorithm, setAlgorithm] = useState<AlgorithmConfig>(INITIAL_ALGORITHM);
-  const [activeRestaurantId, setActiveRestaurantId] = useState<string>('rest-saffron');
 
-  const [driverBatchStatus, setDriverBatchStatus] = useState<
-    'offered' | 'accepted_navigating' | 'declined'
-  >('offered');
-  const [activeStopIndex, setActiveStopIndex] = useState<number>(0);
+  const [dash, setDash] = useState<DashboardState>(EMPTY);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  const roleRef = useRef<UserRole | null>(null);
+  // Responses are applied only if no newer request has already been applied,
+  // so a slow poll never overwrites the result of a later change.
+  const requestSeq = useRef(0);
+  const appliedSeq = useRef(0);
+
+  /* ---------------------------------------------------------------------- */
+  /* Session                                                                 */
+  /* ---------------------------------------------------------------------- */
 
   // The role always comes from the server (or from the profile it returned
   // earlier and we stored securely), never from a choice in the UI.
-  const enter = (account: AuthUser) => {
+  const enter = useCallback((account: AuthUser) => {
     setUser(account);
-    setRoleState(account.role);
-    setActiveScreen(ROLE_SCREENS[account.role][0].key);
+    if (roleRef.current !== account.role) {
+      roleRef.current = account.role;
+      setRoleState(account.role);
+      setActiveScreen(ROLE_SCREENS[account.role][0].key);
+      setDash(EMPTY);
+    }
     setIsLoggedIn(true);
-  };
+  }, []);
+
+  const signOutLocally = useCallback(() => {
+    setApiSession(null);
+    roleRef.current = null;
+    requestSeq.current += 1;
+    appliedSeq.current = requestSeq.current;
+    setUser(null);
+    setDash(EMPTY);
+    setDashboardError(null);
+    setIsLoggedIn(false);
+    clearSession();
+  }, []);
 
   const signIn = (next: AuthSession) => {
-    setRefreshToken(next.tokens.refreshToken);
+    setApiSession(next.tokens);
     enter(next.user);
     saveSession(next);
   };
 
-  const signOutLocally = () => {
-    setUser(null);
-    setRefreshToken(null);
-    setIsLoggedIn(false);
-    clearSession();
-  };
-
   const logout = () => {
-    if (refreshToken) logoutRequest(refreshToken);
+    const token = currentRefreshToken();
+    if (token) logoutRequest(token);
     signOutLocally();
   };
 
@@ -719,6 +430,16 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
   // disabled) the user is signed out; if the server is just unreachable they stay in.
   useEffect(() => {
     let cancelled = false;
+    configureApiClient({
+      onSession: (session) => {
+        if (cancelled) return;
+        enter(session.user);
+        saveSession(session);
+      },
+      onExpired: () => {
+        if (!cancelled) signOutLocally();
+      },
+    });
     (async () => {
       const stored = await loadSession();
       if (cancelled) return;
@@ -726,103 +447,179 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         setIsRestoring(false);
         return;
       }
-      setRefreshToken(stored.refreshToken);
+      setApiSession({ refreshToken: stored.refreshToken });
       enter(stored.user);
       setIsRestoring(false);
-      try {
-        const fresh = await refreshRequest(stored.refreshToken);
-        if (cancelled) return;
-        setRefreshToken(fresh.tokens.refreshToken);
-        setUser(fresh.user);
-        if (fresh.user.role !== stored.user.role) enter(fresh.user);
-        await saveSession(fresh);
-      } catch (err) {
-        if (cancelled) return;
-        if (err instanceof ApiError && err.code !== 'NETWORK_ERROR') signOutLocally();
-      }
+      // Sign-out on rejection is handled by onExpired; network errors keep the user in.
+      refreshSession().catch(() => {});
     })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enter, signOutLocally]);
+
+  /* ---------------------------------------------------------------------- */
+  /* Dashboard                                                               */
+  /* ---------------------------------------------------------------------- */
+
+  const apply = useCallback((d: Dashboard | undefined, seq: number) => {
+    if (!d || seq < appliedSeq.current || d.role !== roleRef.current) return;
+    appliedSeq.current = seq;
+    registerCoords(d);
+    setDash({ data: d, receivedAt: Date.now() });
+    setDashboardError(null);
   }, []);
+
+  /** Calls an endpoint that answers with `{ dashboard }` and shows the new state. */
+  const call = useCallback(
+    async <T extends { dashboard?: Dashboard }>(
+      method: 'GET' | 'POST' | 'PUT' | 'PATCH',
+      path: string,
+      body?: unknown
+    ): Promise<T> => {
+      const seq = ++requestSeq.current;
+      const res = await api<T>(method, path, body);
+      apply(res.dashboard, seq);
+      return res;
+    },
+    [apply]
+  );
+
+  const refreshDashboard = useCallback(async () => {
+    const current = roleRef.current;
+    if (!current) return;
+    const seq = ++requestSeq.current;
+    try {
+      const d = await api<Dashboard>('GET', `/api/${current}/dashboard`);
+      apply(d, seq);
+    } catch (err) {
+      if (roleRef.current === current) setDashboardError(errorMessage(err));
+    }
+  }, [apply]);
+
+  // Load on sign-in, then keep it fresh while the app is in the foreground.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    refreshDashboard();
+    let timer: ReturnType<typeof setInterval> | null = setInterval(refreshDashboard, POLL_MS);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        refreshDashboard();
+        if (!timer) timer = setInterval(refreshDashboard, POLL_MS);
+      } else if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    });
+    return () => {
+      if (timer) clearInterval(timer);
+      sub.remove();
+    };
+  }, [isLoggedIn, role, refreshDashboard]);
+
+  // One clock for every countdown on screen.
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [isLoggedIn]);
+
+  const data = dash.data;
+
+  const orders = useMemo<LiveOrder[]>(() => {
+    if (!data) return [];
+    const elapsed = Math.max(0, Math.floor((now - dash.receivedAt) / 1000));
+    return data.orders.map((o) =>
+      o.status === 'delivered' ? o : { ...o, remainingSeconds: Math.max(0, o.remainingSeconds - elapsed) }
+    );
+  }, [data, dash.receivedAt, now]);
+
+  /* ---------------------------------------------------------------------- */
+  /* Screens                                                                 */
+  /* ---------------------------------------------------------------------- */
+
+  const me = data?.me ?? null;
+  const driverApproval: DriverProfile['approval'] =
+    me?.approval ??
+    (user?.driver
+      ? user.driver.status === 'approved_online' || user.driver.status === 'offline'
+        ? 'approved'
+        : user.driver.status === 'rejected'
+        ? 'rejected'
+        : 'pending'
+      : 'approved');
+
+  const screens = useMemo(
+    () =>
+      role === 'driver' && driverApproval !== 'approved'
+        ? ROLE_SCREENS.driver.filter((s) => s.key === 'kyc_docs')
+        : ROLE_SCREENS[role],
+    [role, driverApproval]
+  );
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setOrders((prev) =>
-        prev.map((ord) => {
-          if (ord.status === 'delivered') return ord;
-          const nextRemaining = Math.max(0, ord.remainingSeconds - 1);
-          return {
-            ...ord,
-            remainingSeconds: nextRemaining,
-          };
-        })
-      );
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+    if (!screens.some((s) => s.key === activeScreen)) setActiveScreen(screens[0].key);
+  }, [screens, activeScreen]);
 
-  const calculateOrderFinancials = (
-    distanceMiles: number,
-    batchPosition: number,
-    dispatchType: 'open_platform' | 'own_driver'
-  ) => {
-    if (dispatchType === 'own_driver') {
-      return { restaurantFeeGbp: 0, driverPayoutGbp: 0, platformMarginGbp: 0 };
+  /* ---------------------------------------------------------------------- */
+  /* Actions                                                                 */
+  /* ---------------------------------------------------------------------- */
+
+  /** Runs a change and reports failure to the user. */
+  const attempt = async (fn: () => Promise<unknown>): Promise<boolean> => {
+    try {
+      await fn();
+      return true;
+    } catch (err) {
+      showError(err);
+      return false;
     }
-    const extraMiles = Math.max(0, distanceMiles - algorithm.baseDistanceMiles);
-    const restaurantFeeGbp = Number(
-      (
-        algorithm.baseRestaurantChargeGbp +
-        extraMiles * algorithm.extraMileRestaurantChargeGbp
-      ).toFixed(2)
-    );
-
-    const stepIndex = Math.max(
-      0,
-      Math.min(batchPosition - 1, algorithm.steppedDriverPayoutsGbp.length - 1)
-    );
-    const baseDriverPay = algorithm.steppedDriverPayoutsGbp[stepIndex] ?? 2.2;
-    const driverPayoutGbp = Number(
-      (baseDriverPay + extraMiles * algorithm.extraMileDriverPayoutGbp).toFixed(2)
-    );
-    const platformMarginGbp = Number((restaurantFeeGbp - driverPayoutGbp).toFixed(2));
-
-    return { restaurantFeeGbp, driverPayoutGbp, platformMarginGbp };
   };
 
-  const recalculateBatchOrders = (
-    currentOrders: LiveOrder[],
-    nextAlgo: AlgorithmConfig
-  ): LiveOrder[] => {
-    return currentOrders.map((ord) => {
-      if (ord.dispatchType === 'own_driver') return ord;
-      const pos = ord.batchPosition ?? 1;
-      const extraMiles = Math.max(0, ord.distanceMiles - nextAlgo.baseDistanceMiles);
-      const restaurantFeeGbp = Number(
-        (
-          nextAlgo.baseRestaurantChargeGbp +
-          extraMiles * nextAlgo.extraMileRestaurantChargeGbp
-        ).toFixed(2)
+  // Driver
+  const setOnline = (online: boolean) => attempt(() => call('PUT', '/api/driver/availability', { online }));
+  const acceptCurrentBatch = () => attempt(() => call('POST', '/api/driver/batch/accept'));
+  const declineCurrentBatch = () => attempt(() => call('POST', '/api/driver/batch/decline'));
+  const advanceActiveStop = () => attempt(() => call('POST', '/api/driver/batch/advance'));
+  const findNewOrders = () => attempt(() => call('POST', '/api/driver/batch/next'));
+
+  const appendOrderToDriverBatch = async (orderId: string) => {
+    try {
+      const res = await call<{ ok: boolean; message: string; dashboard: Dashboard }>(
+        'POST',
+        `/api/driver/pool/${orderId}/add`
       );
-      const stepIndex = Math.max(
-        0,
-        Math.min(pos - 1, nextAlgo.steppedDriverPayoutsGbp.length - 1)
-      );
-      const baseDriverPay = nextAlgo.steppedDriverPayoutsGbp[stepIndex] ?? 2.2;
-      const driverPayoutGbp = Number(
-        (baseDriverPay + extraMiles * nextAlgo.extraMileDriverPayoutGbp).toFixed(2)
-      );
-      return {
-        ...ord,
-        restaurantFeeGbp,
-        driverPayoutGbp,
-      };
-    });
+      return { ok: res.ok, message: res.message };
+    } catch (err) {
+      return { ok: false, message: errorMessage(err) };
+    }
   };
 
-  const publishScannedOrder: InThaRouteContextType['publishScannedOrder'] = ({
+  const uploadDriverKycDoc = (docId: string, image: PickedImage) =>
+    attempt(() =>
+      call('POST', `/api/driver/documents/${docId}/upload`, {
+        imageBase64: image.base64,
+        mimeType: image.mimeType,
+      })
+    );
+
+  // Restaurant
+  const scanReceipt = async (image: PickedImage) => {
+    try {
+      const { draft } = await api<{ draft: ReceiptTemplate }>('POST', '/api/restaurant/receipts/scan', {
+        imageBase64: image.base64,
+        mimeType: image.mimeType,
+      });
+      registerPostcodeCoords(draft.restaurantPostcode, draft.pickupCoords);
+      registerPostcodeCoords(draft.postcode, draft.dropoffCoords);
+      return draft;
+    } catch (err) {
+      showError(err, 'Couldn’t read the receipt');
+      return null;
+    }
+  };
+
+  const publishScannedOrder: InThaRouteContextType['publishScannedOrder'] = async ({
     template,
     prepMinutes,
     dispatchType,
@@ -830,277 +627,98 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
     customAddress,
     customPostcode,
     customAccessCode,
-    autoBatchWithActive = true,
   }) => {
-    const existingBatchOrders = orders.filter(
-      (o) => o.batchId === 'BATCH-RICHMOND-01' && o.status !== 'delivered'
-    );
-    const canJoinBatch =
-      dispatchType === 'open_platform' &&
-      autoBatchWithActive &&
-      existingBatchOrders.length < algorithm.maxBatchSize;
-
-    const batchPosition = canJoinBatch ? existingBatchOrders.length + 1 : 1;
-    const financials = calculateOrderFinancials(
-      template.distanceMiles,
-      batchPosition,
-      dispatchType
-    );
-
-    const ownDriver = ownDriverId ? drivers.find((d) => d.id === ownDriverId) : undefined;
-
-    const newOrder: LiveOrder = {
-      id: `ord-${Date.now()}`,
-      source: template.source,
-      externalOrderId: template.externalOrderId,
-      restaurantId: template.restaurantId,
-      restaurantName: template.restaurantName,
-      restaurantAddress: template.restaurantAddress,
-      restaurantPostcode: template.restaurantPostcode,
-      customerName: template.customerName,
-      customerPhone: template.customerPhone,
-      phoneAccessCode: customAccessCode ?? template.phoneAccessCode,
-      directCustomerPhone: template.directCustomerPhone,
-      deliveryAddress: customAddress || template.deliveryAddress,
-      postcode: customPostcode || template.postcode,
-      deliveryInstructions: template.deliveryInstructions,
-      restaurantPickupNote: template.restaurantPickupNote,
-      distanceMiles: template.distanceMiles,
-      prepMinutes,
-      remainingSeconds: prepMinutes * 60,
-      orderTotalGbp: template.orderTotalGbp,
-      items: template.items,
-      dispatchType,
-      status:
-        dispatchType === 'own_driver'
-          ? 'driver_assigned'
-          : canJoinBatch
-          ? driverBatchStatus === 'accepted_navigating'
-            ? 'driver_assigned'
-            : 'batched_offered'
-          : 'preparing',
-      assignedDriverId:
-        dispatchType === 'own_driver'
-          ? ownDriver?.id ?? 'drv-carlos-own'
-          : canJoinBatch
-          ? 'drv-gustavo'
-          : undefined,
-      assignedDriverName:
-        dispatchType === 'own_driver'
-          ? ownDriver?.name ?? 'Carlos Silva (In-House)'
-          : canJoinBatch
-          ? 'Gustavo Oliveira'
-          : undefined,
-      batchId: canJoinBatch ? 'BATCH-RICHMOND-01' : undefined,
-      batchPosition: canJoinBatch ? batchPosition : 1,
-      restaurantFeeGbp: financials.restaurantFeeGbp,
-      driverPayoutGbp: financials.driverPayoutGbp,
-      createdAtLabel: 'Scanned just now',
-      mapCoords: template.mapCoords,
-    };
-
-    setOrders((prev) => [newOrder, ...prev]);
-    if (canJoinBatch && driverBatchStatus === 'declined') {
-      setDriverBatchStatus('offered');
-    }
-    return newOrder;
-  };
-
-  const markOrderReady = (orderId: string) => {
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === orderId ? { ...o, remainingSeconds: 0, status: 'ready_for_pickup' } : o
-      )
-    );
-  };
-
-  const acceptCurrentBatch = () => {
-    setDriverBatchStatus('accepted_navigating');
-    setActiveStopIndex(0);
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.batchId === 'BATCH-RICHMOND-01' ? { ...o, status: 'driver_assigned' } : o
-      )
-    );
-  };
-
-  const declineCurrentBatch = () => {
-    setDriverBatchStatus('declined');
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.batchId === 'BATCH-RICHMOND-01'
-          ? {
-              ...o,
-              batchId: undefined,
-              batchPosition: 1,
-              assignedDriverId: undefined,
-              assignedDriverName: undefined,
-              status: 'preparing',
-            }
-          : o
-      )
-    );
-  };
-
-  const resetDemoBatchOffer = () => {
-    setDriverBatchStatus('offered');
-    setActiveStopIndex(0);
-    setOrders((prev) => {
-      let pos = 1;
-      return prev.map((o, idx) => {
-        if (idx < 2 || o.batchId === 'BATCH-RICHMOND-01') {
-          const currentPos = pos++;
-          const fin = calculateOrderFinancials(o.distanceMiles, currentPos, 'open_platform');
-          return {
-            ...o,
-            batchId: 'BATCH-RICHMOND-01',
-            batchPosition: currentPos,
-            assignedDriverId: 'drv-gustavo',
-            assignedDriverName: 'Gustavo Oliveira',
-            status: 'batched_offered',
-            restaurantFeeGbp: fin.restaurantFeeGbp,
-            driverPayoutGbp: fin.driverPayoutGbp,
-          };
-        }
-        return o;
+    try {
+      const res = await call<{ order: LiveOrder; dashboard: Dashboard }>('POST', '/api/restaurant/orders', {
+        source: template.source,
+        externalOrderId: template.externalOrderId,
+        customerName: template.customerName,
+        customerPhone: template.customerPhone,
+        phoneAccessCode: customAccessCode ?? template.phoneAccessCode ?? '',
+        directCustomerPhone: template.directCustomerPhone ?? '',
+        deliveryAddress: customAddress || template.deliveryAddress,
+        postcode: customPostcode || template.postcode,
+        deliveryInstructions: template.deliveryInstructions,
+        orderTotalGbp: template.orderTotalGbp,
+        items: template.items.filter((i) => i.name && i.quantity > 0),
+        prepMinutes,
+        dispatchType,
+        ...(dispatchType === 'own_driver' && { ownDriverId }),
       });
-    });
-  };
-
-  const advanceActiveStop = () => {
-    const batchOrders = orders.filter((o) => o.batchId === 'BATCH-RICHMOND-01');
-    const totalStops = batchOrders.length * 2;
-    if (activeStopIndex + 1 < totalStops) {
-      setActiveStopIndex((prev) => prev + 1);
-    } else {
-      setOrders((prev) =>
-        prev.map((o) =>
-          o.batchId === 'BATCH-RICHMOND-01' ? { ...o, status: 'delivered', remainingSeconds: 0 } : o
-        )
-      );
-      setActiveStopIndex(0);
+      return res.order;
+    } catch (err) {
+      showError(err, 'Couldn’t post the order');
+      return null;
     }
   };
 
-  const appendOrderToDriverBatch = (orderId: string) => {
-    const currentBatch = orders.filter(
-      (o) => o.batchId === 'BATCH-RICHMOND-01' && o.status !== 'delivered'
-    );
-    if (currentBatch.length >= algorithm.maxBatchSize) {
+  const markOrderReady = (orderId: string) =>
+    attempt(() => call('POST', `/api/restaurant/orders/${orderId}/ready`));
+
+  const addRestaurantOwnDriver: InThaRouteContextType['addRestaurantOwnDriver'] = async (p) => {
+    try {
+      await call('POST', '/api/restaurant/drivers', {
+        fullName: p.name,
+        email: p.email,
+        password: p.password,
+        phone: p.phone,
+        vehicle: p.vehicle,
+        ...(p.plateNumber && { plateNumber: p.plateNumber }),
+      });
+      return { ok: true };
+    } catch (err) {
       return {
         ok: false,
-        message: `Maximum batch limit of ${algorithm.maxBatchSize} orders reached.`,
+        message: errorMessage(err),
+        fields: err instanceof ApiError ? err.fields : {},
       };
     }
+  };
 
-    const nextPosition = currentBatch.length + 1;
-    setOrders((prev) =>
-      prev.map((o) => {
-        if (o.id !== orderId) return o;
-        const fin = calculateOrderFinancials(o.distanceMiles, nextPosition, 'open_platform');
-        return {
-          ...o,
-          batchId: 'BATCH-RICHMOND-01',
-          batchPosition: nextPosition,
-          assignedDriverId: 'drv-gustavo',
-          assignedDriverName: 'Gustavo Oliveira',
-          status:
-            driverBatchStatus === 'accepted_navigating' ? 'driver_assigned' : 'batched_offered',
-          restaurantFeeGbp: fin.restaurantFeeGbp,
-          driverPayoutGbp: fin.driverPayoutGbp,
-        };
-      })
-    );
-    if (driverBatchStatus === 'declined') {
-      setDriverBatchStatus('offered');
+  const patchData = (fn: (d: Dashboard) => Dashboard) =>
+    setDash((prev) => (prev.data ? { ...prev, data: fn(prev.data) } : prev));
+
+  const updateRestaurantPolicy = async (restaurantId: string, policy: DriverPolicy) => {
+    const previous = data?.restaurants.find((r) => r.id === restaurantId)?.driverPolicy;
+    // Show the choice straight away; the server's answer replaces it.
+    patchData((d) => ({
+      ...d,
+      restaurants: d.restaurants.map((r) => (r.id === restaurantId ? { ...r, driverPolicy: policy } : r)),
+    }));
+    const path =
+      role === 'admin' ? `/api/admin/restaurants/${restaurantId}/policy` : '/api/restaurant/policy';
+    const ok = await attempt(() => call('PATCH', path, { driverPolicy: policy }));
+    if (!ok && previous) {
+      patchData((d) => ({
+        ...d,
+        restaurants: d.restaurants.map((r) => (r.id === restaurantId ? { ...r, driverPolicy: previous } : r)),
+      }));
     }
-    return {
-      ok: true,
-      message: `Added as Order #${nextPosition} in your active batch.`,
-    };
+    return ok;
   };
 
-  const addRestaurantOwnDriver: InThaRouteContextType['addRestaurantOwnDriver'] = ({
-    restaurantId,
-    name,
-    phone,
-    vehicle,
-    plateNumber,
-  }) => {
-    const rest = restaurants.find((r) => r.id === restaurantId);
-    const newDriver: DriverProfile = {
-      id: `drv-own-${Date.now()}`,
-      name,
-      email: `${name.toLowerCase().replace(/\s+/g, '.')}@inhouse.local`,
-      phone,
-      driverType: 'restaurant_own',
-      employerRestaurantId: restaurantId,
-      employerRestaurantName: rest?.name ?? 'Partner Restaurant',
-      vehicle,
-      plateNumber: plateNumber || 'In-House Fleet',
-      status: 'approved_online',
-      rating: 5.0,
-      completedDeliveries: 1,
-      kycDocuments: [],
-    };
-    setDrivers((prev) => [newDriver, ...prev]);
-  };
+  // Admin
+  const approveDriverKyc = (driverId: string) =>
+    attempt(() => call('POST', `/api/admin/drivers/${driverId}/approve`));
 
-  const updateRestaurantPolicy = (restaurantId: string, policy: DriverPolicy) => {
-    setRestaurants((prev) =>
-      prev.map((r) => (r.id === restaurantId ? { ...r, driverPolicy: policy } : r))
-    );
-  };
+  const rejectDriverKyc = (driverId: string, reason?: string) =>
+    attempt(() => call('POST', `/api/admin/drivers/${driverId}/reject`, reason ? { reason } : {}));
 
-  const uploadDriverKycDoc = (driverId: string, docId: string, newValue: string) => {
-    setDrivers((prev) =>
-      prev.map((drv) => {
-        if (drv.id !== driverId) return drv;
-        return {
-          ...drv,
-          kycDocuments: drv.kycDocuments.map((d) =>
-            d.id === docId
-              ? { ...d, value: newValue, status: 'pending', updatedAt: 'Submitted just now' }
-              : d
-          ),
-        };
-      })
-    );
-  };
+  const algorithm = data?.algorithm ?? DEFAULT_ALGORITHM;
 
-  const approveDriverKyc = (driverId: string) => {
-    setDrivers((prev) =>
-      prev.map((drv) => {
-        if (drv.id !== driverId) return drv;
-        return {
-          ...drv,
-          status: 'approved_online',
-          kycDocuments: drv.kycDocuments.map((d) => ({
-            ...d,
-            status: 'verified',
-            updatedAt: 'Approved by Admin',
-          })),
-        };
-      })
-    );
-  };
-
-  const updateAlgorithmConfig = (partial: Partial<AlgorithmConfig>) => {
-    setAlgorithm((prev) => {
-      const next = { ...prev, ...partial };
-      setOrders((curr) => recalculateBatchOrders(curr, next));
-      return next;
-    });
+  const updateAlgorithmConfig = async (partial: Partial<AlgorithmConfig>) => {
+    // Steppers can be tapped quickly: show the new value now so the next tap
+    // builds on it. All money figures still come from the server's response.
+    patchData((d) => ({ ...d, algorithm: { ...d.algorithm, ...partial } }));
+    const ok = await attempt(() => call('PUT', '/api/admin/pricing', partial));
+    if (!ok) refreshDashboard();
+    return ok;
   };
 
   const updateSteppedPayoutAt = (orderPositionIndex: number, amountGbp: number) => {
-    setAlgorithm((prev) => {
-      const updatedSteps = [...prev.steppedDriverPayoutsGbp];
-      updatedSteps[orderPositionIndex] = Number(Math.max(0.5, amountGbp).toFixed(2));
-      const next = { ...prev, steppedDriverPayoutsGbp: updatedSteps };
-      setOrders((curr) => recalculateBatchOrders(curr, next));
-      return next;
-    });
+    const steps = [...algorithm.steppedDriverPayoutsGbp];
+    steps[orderPositionIndex] = Number(Math.max(0.5, amountGbp).toFixed(2));
+    return updateAlgorithmConfig({ steppedDriverPayoutsGbp: steps });
   };
 
   return (
@@ -1110,32 +728,45 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         role,
         activeScreen,
         setActiveScreen,
+        screens,
         isRestoring,
         user,
         signIn,
         logout,
+        isDashboardReady: !!data && data.role === role,
+        dashboardError,
+        refreshDashboard,
         orders,
-        drivers,
-        restaurants,
+        drivers: data?.drivers ?? [],
+        restaurants: data?.restaurants ?? [],
         algorithm,
-        activeRestaurantId,
-        setActiveRestaurantId,
-        driverBatchStatus,
-        activeStopIndex,
+        activeRestaurantId: data?.activeRestaurantId ?? user?.restaurant?.id ?? '',
+        // A restaurant account manages exactly one restaurant.
+        setActiveRestaurantId: () => {},
+        me,
+        isOnline: data?.isOnline ?? false,
+        setOnline,
+        earnings: data?.earnings ?? null,
+        currentBatchId: data?.currentBatchId ?? null,
+        driverBatchStatus: data?.driverBatchStatus ?? 'declined',
+        activeStopIndex: data?.activeStopIndex ?? 0,
         acceptCurrentBatch,
         declineCurrentBatch,
         advanceActiveStop,
-        resetDemoBatchOffer,
+        findNewOrders,
         appendOrderToDriverBatch,
+        uploadDriverKycDoc,
+        scanReceipt,
         publishScannedOrder,
         markOrderReady,
         addRestaurantOwnDriver,
         updateRestaurantPolicy,
-        uploadDriverKycDoc,
+        pricingSummary: data?.pricingSummary ?? null,
+        totals: data?.totals ?? null,
         approveDriverKyc,
+        rejectDriverKyc,
         updateAlgorithmConfig,
         updateSteppedPayoutAt,
-        calculateOrderFinancials,
       }}>
       {children}
     </InThaRouteContext.Provider>

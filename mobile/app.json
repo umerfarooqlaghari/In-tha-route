@@ -38,7 +38,15 @@
           "imageWidth": 76
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "In Tha Route uses the camera to scan order receipts and photograph driver documents.",
+          "photosPermission": "In Tha Route lets you choose a receipt or document photo from your library.",
+          "microphonePermission": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -25,7 +25,7 @@ export interface AuthUser {
     employerRestaurantId: string | null;
     vehicle: Vehicle;
     plateNumber: string | null;
-    status: 'pending_kyc' | 'approved_online' | 'offline';
+    status: 'pending_kyc' | 'approved_online' | 'offline' | 'rejected';
   };
 }
 
@@ -56,7 +56,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly code: string,
-    readonly fields: Record<string, string> = {}
+    readonly fields: Record<string, string> = {},
+    readonly status: number = 0
   ) {
     super(message);
   }
@@ -65,15 +66,27 @@ export class ApiError extends Error {
 // The hosted API sleeps when idle and can take close to a minute to wake.
 const TIMEOUT_MS = 75_000;
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH';
+
+/** One HTTP call to the API. Throws ApiError for network failures and error responses. */
+export async function request<T>(
+  method: HttpMethod,
+  path: string,
+  body?: unknown,
+  accessToken?: string
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
+      method,
+      headers: {
+        Accept: 'application/json',
+        ...(body !== undefined && { 'Content-Type': 'application/json' }),
+        ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
   } catch {
@@ -96,9 +109,12 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   throw new ApiError(
     error?.message ?? 'Something went wrong. Please try again.',
     error?.code ?? 'UNKNOWN',
-    fields
+    fields,
+    res.status
   );
 }
+
+const post = <T,>(path: string, body: unknown) => request<T>('POST', path, body);
 
 export const signupRequest = (input: SignupInput) => post<AuthSession>('/api/auth/signup', input);
 

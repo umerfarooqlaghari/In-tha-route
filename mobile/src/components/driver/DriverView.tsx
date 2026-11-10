@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LiveMap, MapPin } from '@/components/LiveMap';
@@ -23,10 +23,9 @@ import {
 import { Brand, formatCountdown, formatGbp } from '@/constants/brand';
 import { coordsForPostcode, DRIVER_START, LatLng } from '@/constants/geo';
 import { KycDocument, LiveOrder, useInThaRoute } from '@/context/InThaRouteContext';
+import { chooseImage } from '@/utils/pickImage';
 
 const C = Brand.colors;
-const BATCH_ID = 'BATCH-RICHMOND-01';
-const DRIVER_ID = 'drv-gustavo';
 
 export function DriverView() {
   const { activeScreen } = useInThaRoute();
@@ -54,10 +53,11 @@ interface Stop {
 }
 
 function useActiveBatch() {
-  const { orders } = useInThaRoute();
+  const { orders, currentBatchId } = useInThaRoute();
   return useMemo(() => {
+    const inBatch = (o: LiveOrder) => !!currentBatchId && o.batchId === currentBatchId;
     const batch = orders
-      .filter((o) => o.batchId === BATCH_ID && o.status !== 'delivered')
+      .filter((o) => inBatch(o) && o.status !== 'delivered')
       .sort((a, b) => (a.batchPosition ?? 0) - (b.batchPosition ?? 0));
     const stops: Stop[] = [
       ...batch.map((o) => ({
@@ -73,9 +73,34 @@ function useActiveBatch() {
         coordinate: coordsForPostcode(o.postcode),
       })),
     ];
-    const delivered = orders.filter((o) => o.batchId === BATCH_ID && o.status === 'delivered');
+    const delivered = orders.filter((o) => inBatch(o) && o.status === 'delivered');
     return { batch, stops, delivered };
-  }, [orders]);
+  }, [orders, currentBatchId]);
+}
+
+/** Opens the phone dialer. */
+const callNumber = (phone?: string) => {
+  const digits = (phone ?? '').replace(/[^\d+]/g, '');
+  if (!digits) {
+    Alert.alert('No phone number', 'There is no phone number for this stop.');
+    return;
+  }
+  Linking.openURL(`tel:${digits}`).catch(() => {});
+};
+
+/** Shows a spinner on a button while its request runs, and ignores double taps. */
+function useBusy() {
+  const [busy, setBusy] = useState<string | null>(null);
+  const run = async (key: string, fn: () => Promise<unknown>) => {
+    if (busy) return;
+    setBusy(key);
+    try {
+      await fn();
+    } finally {
+      setBusy(null);
+    }
+  };
+  return { busy, run };
 }
 
 const shortArea = (address: string) => {
@@ -95,12 +120,15 @@ function DriveScreen() {
     acceptCurrentBatch,
     declineCurrentBatch,
     advanceActiveStop,
-    resetDemoBatchOffer,
+    findNewOrders,
     setActiveScreen,
+    isOnline: online,
+    setOnline,
   } = useInThaRoute();
   const { batch, stops, delivered } = useActiveBatch();
-  const [online, setOnline] = useState(true);
+  const { busy, run } = useBusy();
   const [sheetHeight, setSheetHeight] = useState(320);
+  const toggleOnline = () => run('online', () => setOnline(!online));
 
   const navigating = driverBatchStatus === 'accepted_navigating' && batch.length > 0;
   const offered = driverBatchStatus === 'offered' && batch.length > 0;
@@ -155,7 +183,8 @@ function DriveScreen() {
       {/* Online toggle */}
       <View style={styles.topFloat} pointerEvents="box-none">
         <Pressable
-          onPress={() => setOnline((v) => !v)}
+          onPress={toggleOnline}
+          disabled={!!busy}
           style={[styles.onlinePill, Brand.shadow.floating]}>
           <View style={[styles.onlineDot, { backgroundColor: online ? C.success : C.ink3 }]} />
           <Text style={styles.onlineText}>{online ? 'Online' : 'Offline'}</Text>
@@ -172,7 +201,7 @@ function DriveScreen() {
           <View style={styles.sheetBody}>
             <Text style={styles.sheetTitle}>You’re offline</Text>
             <Text style={styles.muted}>Go online to receive orders.</Text>
-            <Button label="Go online" onPress={() => setOnline(true)} />
+            <Button label="Go online" loading={busy === 'online'} onPress={toggleOnline} />
           </View>
         ) : offered ? (
           <View style={styles.sheetBody}>
@@ -197,8 +226,21 @@ function DriveScreen() {
             </View>
 
             <View style={styles.actions}>
-              <Button label="Decline" variant="secondary" onPress={declineCurrentBatch} style={styles.flex1} />
-              <Button label="Accept" onPress={acceptCurrentBatch} style={styles.flex2} />
+              <Button
+                label="Decline"
+                variant="secondary"
+                loading={busy === 'decline'}
+                disabled={!!busy}
+                onPress={() => run('decline', declineCurrentBatch)}
+                style={styles.flex1}
+              />
+              <Button
+                label="Accept"
+                loading={busy === 'accept'}
+                disabled={!!busy}
+                onPress={() => run('accept', acceptCurrentBatch)}
+                style={styles.flex2}
+              />
             </View>
           </View>
         ) : navigating && current ? (
@@ -255,12 +297,23 @@ function DriveScreen() {
             ) : null}
 
             <View style={styles.actions}>
-              <IconButton icon="call-outline" />
+              <IconButton
+                icon="call-outline"
+                onPress={() =>
+                  callNumber(
+                    current.type === 'pickup'
+                      ? current.order.restaurantPhone
+                      : current.order.directCustomerPhone || current.order.customerPhone
+                  )
+                }
+              />
               <IconButton icon="navigate-outline" onPress={() => openNavigation(current.coordinate)} />
               <Button
                 label={current.type === 'pickup' ? 'Picked up' : 'Delivered'}
                 variant={current.type === 'pickup' ? 'dark' : 'success'}
-                onPress={advanceActiveStop}
+                loading={busy === 'advance'}
+                disabled={!!busy}
+                onPress={() => run('advance', advanceActiveStop)}
                 style={styles.flex1}
               />
             </View>
@@ -275,7 +328,13 @@ function DriveScreen() {
               {formatGbp(delivered.reduce((s, o) => s + o.driverPayoutGbp, 0))}
             </Text>
             <Text style={styles.muted}>Added to this week’s earnings</Text>
-            <Button label="Find new orders" onPress={resetDemoBatchOffer} style={styles.stretch} />
+            <Button
+              label="Find new orders"
+              loading={busy === 'next'}
+              disabled={!!busy}
+              onPress={() => run('next', findNewOrders)}
+              style={styles.stretch}
+            />
           </View>
         ) : (
           <View style={styles.sheetBody}>
@@ -288,7 +347,14 @@ function DriveScreen() {
                 onPress={() => setActiveScreen('open_pool')}
                 style={styles.flex1}
               />
-              <Button label="Refresh" icon="refresh" onPress={resetDemoBatchOffer} style={styles.flex1} />
+              <Button
+                label="Refresh"
+                icon="refresh"
+                loading={busy === 'next'}
+                disabled={!!busy}
+                onPress={() => run('next', findNewOrders)}
+                style={styles.flex1}
+              />
             </View>
           </View>
         )}
@@ -350,10 +416,10 @@ function SearchingRow() {
 /* ========================================================================== */
 
 function OrderPoolScreen() {
-  const { orders, algorithm, appendOrderToDriverBatch, calculateOrderFinancials, setActiveScreen } =
-    useInThaRoute();
+  const { orders, algorithm, appendOrderToDriverBatch, setActiveScreen } = useInThaRoute();
   const { batch } = useActiveBatch();
-  const [toast, setToast] = useState<string | null>(null);
+  const { busy, run } = useBusy();
+  const [toast, setToast] = useState<{ ok: boolean; message: string } | null>(null);
 
   const pool = orders.filter(
     (o) => !o.batchId && o.status !== 'delivered' && o.dispatchType === 'open_platform'
@@ -370,11 +436,12 @@ function OrderPoolScreen() {
     })),
   ];
 
-  const add = (id: string) => {
-    const res = appendOrderToDriverBatch(id);
-    setToast(res.message);
-    setTimeout(() => setToast(null), 2500);
-  };
+  const add = (id: string) =>
+    run(id, async () => {
+      const res = await appendOrderToDriverBatch(id);
+      setToast(res);
+      setTimeout(() => setToast(null), 2500);
+    });
 
   return (
     <Screen>
@@ -400,10 +467,14 @@ function OrderPoolScreen() {
       </Card>
 
       {toast && (
-        <View style={styles.toast}>
-          <Ionicons name="checkmark-circle" size={18} color={C.success} />
+        <View style={[styles.toast, !toast.ok && styles.toastError]}>
+          <Ionicons
+            name={toast.ok ? 'checkmark-circle' : 'alert-circle'}
+            size={18}
+            color={toast.ok ? C.success : C.primary}
+          />
           <Text style={styles.toastText} numberOfLines={2}>
-            {toast}
+            {toast.message}
           </Text>
         </View>
       )}
@@ -416,7 +487,8 @@ function OrderPoolScreen() {
         </Card>
       ) : (
         pool.map((o, i) => {
-          const pay = calculateOrderFinancials(o.distanceMiles, batch.length + 1, 'open_platform').driverPayoutGbp;
+          // Worked out by the server for the position this order would take in your run.
+          const pay = o.nextPayoutGbp ?? o.driverPayoutGbp;
           return (
             <Card key={o.id}>
               <View style={styles.rowBetween}>
@@ -442,7 +514,14 @@ function OrderPoolScreen() {
                   {o.distanceMiles} mi ·{' '}
                   {o.remainingSeconds > 0 ? `Ready ${formatCountdown(o.remainingSeconds)}` : 'Ready'}
                 </Text>
-                <Button label="Add" icon="add" compact disabled={full} onPress={() => add(o.id)} />
+                <Button
+                  label="Add"
+                  icon="add"
+                  compact
+                  loading={busy === o.id}
+                  disabled={full || !!busy}
+                  onPress={() => add(o.id)}
+                />
               </View>
             </Card>
           );
@@ -456,29 +535,13 @@ function OrderPoolScreen() {
 /* Earnings                                                                    */
 /* ========================================================================== */
 
-const WEEK = [
-  { day: 'M', value: 58 },
-  { day: 'T', value: 72 },
-  { day: 'W', value: 44 },
-  { day: 'T', value: 81 },
-  { day: 'F', value: 96 },
-  { day: 'S', value: 61 },
-];
-
-const RECENT_TRIPS = [
-  { title: 'Richmond · 3 orders', time: 'Today, 19:42', pay: 10.0 },
-  { title: 'Twickenham · 2 orders', time: 'Today, 18:05', pay: 7.2 },
-  { title: 'Isleworth · 1 order', time: 'Yesterday, 21:10', pay: 4.0 },
-  { title: 'Hounslow · 2 orders', time: 'Yesterday, 19:30', pay: 7.2 },
-];
-
 function EarningsScreen() {
-  const { algorithm } = useInThaRoute();
-  const { delivered } = useActiveBatch();
-  const today = 34.4 + delivered.reduce((s, o) => s + o.driverPayoutGbp, 0);
-  const days = [...WEEK, { day: 'S', value: today }];
-  const total = days.reduce((s, d) => s + d.value, 0);
-  const max = Math.max(...days.map((d) => d.value));
+  const { algorithm, earnings } = useInThaRoute();
+  // Last 7 days from the server; the last entry is today.
+  const days = earnings?.week ?? [];
+  const total = earnings?.totalGbp ?? 0;
+  const max = Math.max(1, ...days.map((d) => d.value));
+  const recentTrips = earnings?.recentTrips ?? [];
   const ordinals = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
 
   return (
@@ -508,11 +571,11 @@ function EarningsScreen() {
       </Card>
 
       <Card style={styles.statsCard}>
-        <Stat label="Trips" value="38" />
+        <Stat label="Trips" value={`${earnings?.trips ?? 0}`} />
         <View style={styles.vDivider} />
-        <Stat label="Online" value="21h" />
+        <Stat label="Online" value={`${earnings?.onlineHours ?? 0}h`} />
         <View style={styles.vDivider} />
-        <Stat label="Rating" value="4.96" />
+        <Stat label="Rating" value={(earnings?.rating ?? 5).toFixed(2)} />
       </Card>
 
       <SectionLabel>Batch pay</SectionLabel>
@@ -528,8 +591,11 @@ function EarningsScreen() {
 
       <SectionLabel>Recent trips</SectionLabel>
       <Card>
-        {RECENT_TRIPS.map((t, i) => (
-          <View key={i} style={styles.gap12}>
+        {recentTrips.length === 0 && (
+          <EmptyState icon="bicycle-outline" title="No trips yet" subtitle="Finished runs appear here." />
+        )}
+        {recentTrips.map((t, i) => (
+          <View key={t.id} style={styles.gap12}>
             {i > 0 && <Divider />}
             <ListRow
               left={<IconTile icon="bicycle-outline" size={36} />}
@@ -559,13 +625,31 @@ const DOC_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
 const cleanTitle = (t: string) => t.replace(/\s*\(.*?\)/g, '');
 
 function DocumentsScreen() {
-  const { drivers, uploadDriverKycDoc } = useInThaRoute();
-  const driver = drivers.find((d) => d.id === DRIVER_ID) ?? drivers[0];
+  const { me, uploadDriverKycDoc } = useInThaRoute();
   const [openDoc, setOpenDoc] = useState<KycDocument | null>(null);
+  const [uploading, setUploading] = useState(false);
 
-  const docs = driver.kycDocuments;
+  const docs = me?.kycDocuments ?? [];
   const verified = docs.filter((d) => d.status === 'verified').length;
+  const missing = docs.filter((d) => d.status === 'missing').length;
   const allGood = verified === docs.length;
+  const rejected = me?.approval === 'rejected';
+  const headline = allGood
+    ? 'You’re verified'
+    : rejected
+    ? 'Not approved yet'
+    : missing > 0
+    ? 'Upload your documents'
+    : 'Under review';
+
+  const upload = async (doc: KycDocument) => {
+    const image = await chooseImage(cleanTitle(doc.title));
+    if (!image) return;
+    setUploading(true);
+    const ok = await uploadDriverKycDoc(doc.id, image);
+    setUploading(false);
+    if (ok) setOpenDoc(null);
+  };
 
   return (
     <Screen>
@@ -577,7 +661,7 @@ function DocumentsScreen() {
             size={44}
           />
           <View style={styles.flexText}>
-            <Text style={styles.cardTitle}>{allGood ? 'You’re verified' : 'Under review'}</Text>
+            <Text style={styles.cardTitle}>{headline}</Text>
             <Text style={styles.muted}>
               {verified} of {docs.length} documents approved
             </Text>
@@ -626,13 +710,15 @@ function DocumentsScreen() {
                 {openDoc.subtitle}
               </Text>
             </Card>
+            {openDoc.status !== 'verified' && (
+              <Text style={styles.muted}>{openDoc.updatedAt}</Text>
+            )}
             <Button
-              label="Upload new photo"
+              label={openDoc.hasFile ? 'Upload new photo' : 'Upload photo'}
               icon="camera-outline"
-              onPress={() => {
-                uploadDriverKycDoc(driver.id, openDoc.id, openDoc.value);
-                setOpenDoc(null);
-              }}
+              loading={uploading}
+              disabled={uploading}
+              onPress={() => upload(openDoc)}
             />
           </>
         )}
@@ -753,6 +839,7 @@ const styles = StyleSheet.create({
     borderRadius: Brand.radius.md,
     backgroundColor: C.successSoft,
   },
+  toastError: { backgroundColor: C.primarySoft },
   toastText: { ...Brand.type.captionStrong, color: C.ink, flex: 1 },
 
   chart: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, height: 130, marginTop: 8 },

@@ -54,7 +54,7 @@ export function AppHeader() {
   const insets = useSafeAreaInsets();
       const {width} = useWindowDimensions();
       const drawerWidth = Math.min(320, width * 0.84);
-      const {role, activeScreen, setActiveScreen, logout, user} = useInThaRoute();
+      const {role, activeScreen, setActiveScreen, logout, user, screens} = useInThaRoute();
       const persona = PERSONAS[role];
       const profileName = user?.fullName ?? persona.name;
       const profileOrg = user ? user.restaurant?.name ?? persona.label : persona.org;
@@ -125,7 +125,7 @@ export function AppHeader() {
 
           {/* Navigation */}
           <View style={styles.nav}>
-            {ROLE_SCREENS[role].map((s) => {
+            {screens.map((s) => {
               const active = s.key === activeScreen;
               return (
                 <Pressable
