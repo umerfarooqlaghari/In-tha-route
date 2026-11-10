@@ -240,13 +240,16 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
   restaurant: [
     { key: 'scan_receipt', title: 'New order', subtitle: 'Scan a receipt', icon: 'scan-outline' },
     { key: 'live_orders', title: 'Live orders', subtitle: 'Prep timers & couriers', icon: 'time-outline' },
+    { key: 'messages', title: 'Messages', subtitle: 'Chats with drivers', icon: 'chatbubbles-outline' },
     { key: 'own_drivers', title: 'My drivers', subtitle: 'Your in-house team', icon: 'people-outline' },
     { key: 'dispatch_policy', title: 'Delivery settings', subtitle: 'Who delivers your orders', icon: 'options-outline' },
   ],
   driver: [
     { key: 'live_route', title: 'Drive', subtitle: 'Offers & navigation', icon: 'navigate-outline' },
     { key: 'open_pool', title: 'Order pool', subtitle: 'Add orders to your route', icon: 'layers-outline' },
+    { key: 'messages', title: 'Messages', subtitle: 'Chats with restaurants', icon: 'chatbubbles-outline' },
     { key: 'earnings', title: 'Earnings', subtitle: 'Payouts & trips', icon: 'wallet-outline' },
+    { key: 'order_history', title: 'Past orders', subtitle: 'Deliveries & pay', icon: 'receipt-outline' },
     { key: 'kyc_docs', title: 'Documents', subtitle: 'Licence, insurance & ID', icon: 'document-text-outline' },
   ],
   admin: [

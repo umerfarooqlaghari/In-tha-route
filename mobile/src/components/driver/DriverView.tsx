@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LiveMap, MapPin } from '@/components/LiveMap';
@@ -23,6 +23,10 @@ import {
 import { Brand, formatCountdown, formatGbp, sourceColor } from '@/constants/brand';
 import { coordsForPostcode, DRIVER_START, LatLng } from '@/constants/geo';
 import { KycDocument, LiveOrder, useInThaRoute } from '@/context/InThaRouteContext';
+import { InboxScreen } from '@/components/chat/Chat';
+import { showPhone, useChat } from '@/context/ChatContext';
+import { api } from '@/services/apiClient';
+import { errorMessage } from '@/context/InThaRouteContext';
 import { chooseImage } from '@/utils/pickImage';
 
 const C = Brand.colors;
@@ -36,6 +40,10 @@ export function DriverView() {
       return <EarningsScreen />;
     case 'kyc_docs':
       return <DocumentsScreen />;
+    case 'messages':
+      return <InboxScreen />;
+    case 'order_history':
+      return <PastOrdersScreen />;
     default:
       return <DriveScreen />;
   }
@@ -78,15 +86,9 @@ function useActiveBatch() {
   }, [orders, currentBatchId]);
 }
 
-/** Opens the phone dialer. */
-const callNumber = (phone?: string) => {
-  const digits = (phone ?? '').replace(/[^\d+]/g, '');
-  if (!digits) {
-    Alert.alert('No phone number', 'There is no phone number for this stop.');
-    return;
-  }
-  Linking.openURL(`tel:${digits}`).catch(() => {});
-};
+/** Shows the number in a pop-up; "Call" opens the phone's dialer. */
+const callNumber = (name: string, phone?: string) =>
+  showPhone(name, phone ?? '', (digits) => Linking.openURL(`tel:${digits}`).catch(() => {}));
 
 /** Shows a spinner on a button while its request runs, and ignores double taps. */
 function useBusy() {
@@ -130,6 +132,7 @@ function DriveScreen() {
   } = useInThaRoute();
   const { batch, stops, delivered } = useActiveBatch();
   const { busy, run } = useBusy();
+  const { openForOrder } = useChat();
   const [sheetHeight, setSheetHeight] = useState(320);
   const toggleOnline = () => run('online', () => setOnline(!online));
 
@@ -311,13 +314,15 @@ function DriveScreen() {
               <IconButton
                 icon="call-outline"
                 onPress={() =>
-                  callNumber(
-                    current.type === 'pickup'
-                      ? current.order.restaurantPhone
-                      : current.order.directCustomerPhone || current.order.customerPhone
-                  )
+                  current.type === 'pickup'
+                    ? callNumber(current.order.restaurantName, current.order.restaurantPhone)
+                    : callNumber(
+                        current.order.customerName || 'Customer',
+                        current.order.directCustomerPhone || current.order.customerPhone
+                      )
                 }
               />
+              <IconButton icon="chatbubble-outline" onPress={() => openForOrder(current.order.id)} />
               <IconButton icon="navigate-outline" onPress={() => openNavigation(current.coordinate)} />
               <Button
                 label={current.type === 'pickup' ? 'Picked up' : 'Delivered'}
@@ -552,7 +557,7 @@ function OrderPoolScreen() {
 /* ========================================================================== */
 
 function EarningsScreen() {
-  const { algorithm, earnings } = useInThaRoute();
+  const { algorithm, earnings, setActiveScreen } = useInThaRoute();
   // Last 7 days from the server; the last entry is today.
   const days = earnings?.week ?? [];
   const total = earnings?.totalGbp ?? 0;
@@ -622,7 +627,203 @@ function EarningsScreen() {
           </View>
         ))}
       </Card>
+      <Button
+        label="All past orders"
+        icon="receipt-outline"
+        variant="secondary"
+        onPress={() => setActiveScreen('order_history')}
+      />
     </Screen>
+  );
+}
+
+/* ========================================================================== */
+/* Past orders                                                                 */
+/* ========================================================================== */
+
+interface PastOrder {
+  id: string;
+  source: string;
+  externalOrderId: string;
+  restaurantName: string;
+  restaurantAddress: string;
+  restaurantPostcode: string;
+  deliveryArea: string;
+  postcode: string;
+  distanceMiles: number;
+  payoutGbp: number;
+  dispatchType: 'open_platform' | 'own_driver';
+  batchPosition: number | null;
+  batchSize: number;
+  itemCount: number;
+  acceptedAt: string | null;
+  pickedUpAt: string | null;
+  deliveredAt: string;
+  deliveredLabel: string;
+  deliveryMinutes: number | null;
+}
+
+interface HistoryPage {
+  orders: PastOrder[];
+  totals: { orders: number; earnedGbp: number };
+  nextBefore: string | null;
+}
+
+const clock = (iso: string | null) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+};
+
+function PastOrdersScreen() {
+  const [orders, setOrders] = useState<PastOrder[]>([]);
+  const [totals, setTotals] = useState<HistoryPage['totals'] | null>(null);
+  const [nextBefore, setNextBefore] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<PastOrder | null>(null);
+
+  const load = async (before?: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const page = await api<HistoryPage>(
+        'GET',
+        `/api/driver/history${before ? `?before=${encodeURIComponent(before)}` : ''}`
+      );
+      setOrders((prev) => (before ? [...prev, ...page.orders] : page.orders));
+      setTotals(page.totals);
+      setNextBefore(page.nextBefore);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const paidByRestaurant = (o: PastOrder) => o.dispatchType === 'own_driver';
+
+  return (
+    <Screen>
+      <Card style={styles.statsCard}>
+        <Stat label="Earned" value={formatGbp(totals?.earnedGbp ?? 0)} tone="success" />
+        <View style={styles.vDivider} />
+        <Stat label="Orders" value={`${totals?.orders ?? 0}`} />
+      </Card>
+
+      {error && (
+        <Card>
+          <Text style={styles.muted}>{error}</Text>
+          <Button label="Try again" icon="refresh" variant="secondary" onPress={() => load()} />
+        </Card>
+      )}
+
+      {!error && orders.length === 0 && !loading && (
+        <Card>
+          <EmptyState icon="receipt-outline" title="No deliveries yet" subtitle="Orders you deliver appear here." />
+        </Card>
+      )}
+
+      {orders.length > 0 && (
+        <Card>
+          {orders.map((o, i) => (
+            <View key={o.id} style={styles.gap12}>
+              {i > 0 && <Divider />}
+              <Pressable onPress={() => setSelected(o)} style={({ pressed }) => [styles.historyRow, pressed && { opacity: 0.7 }]}>
+                <View style={styles.flexText}>
+                  <View style={styles.rowGapShrink}>
+                    <SourceBadge source={o.source} />
+                    <Text style={styles.muted} numberOfLines={1}>
+                      {o.externalOrderId}
+                    </Text>
+                  </View>
+                  <Text style={styles.cardTitle} numberOfLines={1}>
+                    {o.restaurantName}
+                  </Text>
+                  <Text style={styles.muted} numberOfLines={1}>
+                    To {o.deliveryArea} · {o.postcode} · {o.deliveredLabel}
+                  </Text>
+                </View>
+                <View style={styles.historyPay}>
+                  {paidByRestaurant(o) ? (
+                    <Badge label="In-house" tone="info" />
+                  ) : (
+                    <Text style={styles.earnSmall}>+{formatGbp(o.payoutGbp)}</Text>
+                  )}
+                  <Ionicons name="chevron-forward" size={16} color={C.ink3} />
+                </View>
+              </Pressable>
+            </View>
+          ))}
+        </Card>
+      )}
+
+      {loading ? (
+        <ActivityIndicator color={C.primary} />
+      ) : (
+        nextBefore && <Button label="Load more" variant="secondary" onPress={() => load(nextBefore)} />
+      )}
+
+      <Sheet
+        visible={!!selected}
+        onClose={() => setSelected(null)}
+        title={selected ? `${selected.source === 'Eat Presto POS' ? 'Eat Presto' : selected.source} ${selected.externalOrderId}` : ''}>
+        {selected && (
+          <>
+            <View style={styles.center}>
+              <Text style={styles.muted}>{paidByRestaurant(selected) ? 'Paid by restaurant' : 'You earned'}</Text>
+              <Text style={styles.payout}>
+                {paidByRestaurant(selected) ? '—' : formatGbp(selected.payoutGbp)}
+              </Text>
+            </View>
+            <Card>
+              <ListRow
+                left={<IconTile icon="restaurant-outline" size={36} />}
+                title={selected.restaurantName}
+                subtitle={`${selected.restaurantAddress} · ${selected.restaurantPostcode}`}
+              />
+              <Divider />
+              <ListRow
+                left={<IconTile icon="home-outline" size={36} />}
+                title={selected.deliveryArea}
+                subtitle={selected.postcode}
+              />
+            </Card>
+            <Card>
+              <DetailRow label="Distance" value={`${selected.distanceMiles} mi`} />
+              <DetailRow
+                label="In run"
+                value={
+                  selected.batchSize > 1 && selected.batchPosition
+                    ? `Order ${selected.batchPosition} of ${selected.batchSize}`
+                    : 'Single order'
+                }
+              />
+              <DetailRow label="Items" value={`${selected.itemCount}`} />
+              <DetailRow label="Accepted" value={clock(selected.acceptedAt)} />
+              <DetailRow label="Picked up" value={clock(selected.pickedUpAt)} />
+              <DetailRow label="Delivered" value={`${clock(selected.deliveredAt)} · ${selected.deliveredLabel.split(',')[0]}`} />
+              {selected.deliveryMinutes != null && (
+                <DetailRow label="On the road" value={`${selected.deliveryMinutes} min`} />
+              )}
+            </Card>
+          </>
+        )}
+      </Sheet>
+    </Screen>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.payRow}>
+      <Text style={styles.cardBody}>{label}</Text>
+      <Text style={styles.cardTitle}>{value}</Text>
+    </View>
   );
 }
 
@@ -846,6 +1047,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   indexText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  historyRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  historyPay: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  earnSmall: { ...Brand.type.bodyStrong, color: C.success },
   poolMeta: { fontSize: 17, fontWeight: '600', color: C.ink, flexShrink: 1, fontVariant: ['tabular-nums'] },
   earn: { ...Brand.type.heading, color: C.success },
   toast: {

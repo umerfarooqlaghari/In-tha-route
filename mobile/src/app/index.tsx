@@ -6,6 +6,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { LoginScreen } from '@/components/LoginScreen';
 import { Button } from '@/components/ui';
 import { AdminView } from '@/components/admin/AdminView';
+import { ChatThreadModal } from '@/components/chat/Chat';
 import { DriverView } from '@/components/driver/DriverView';
 import { RestaurantView } from '@/components/restaurant/RestaurantView';
 import { Brand } from '@/constants/brand';
@@ -32,6 +33,7 @@ export default function HomeScreen() {
               {role === 'admin' && <AdminView />}
             </DashboardGate>
           </View>
+          {role !== 'admin' && <ChatThreadModal />}
         </>
       )}
     </View>

@@ -31,6 +31,8 @@ import {
   useInThaRoute,
   Vehicle,
 } from '@/context/InThaRouteContext';
+import { InboxScreen } from '@/components/chat/Chat';
+import { useChat } from '@/context/ChatContext';
 import { pickImage } from '@/utils/pickImage';
 
 const C = Brand.colors;
@@ -42,6 +44,8 @@ export function RestaurantView() {
       return <LiveOrdersScreen />;
     case 'own_drivers':
       return <MyDriversScreen />;
+    case 'messages':
+      return <InboxScreen />;
     case 'dispatch_policy':
       return <DeliverySettingsScreen />;
     default:
@@ -446,6 +450,7 @@ function orderPins(orders: LiveOrder[]): MapPin[] {
 
 function LiveOrdersScreen() {
   const { orders, markOrderReady, setActiveScreen, restaurants, activeRestaurantId } = useInThaRoute();
+  const { openForOrder } = useChat();
   const restaurant = restaurants.find((r) => r.id === activeRestaurantId);
   const active = useMemo(
     () => orders.filter((o) => o.status !== 'delivered').sort((a, b) => a.remainingSeconds - b.remainingSeconds),
@@ -526,9 +531,21 @@ function LiveOrdersScreen() {
                     </Text>
                   ) : null}
                 </View>
-                {!isReady && (
-                  <Button label="Mark ready" compact variant="secondary" onPress={() => markOrderReady(o.id)} />
-                )}
+                <View style={styles.rowGap}>
+                  {/* Chat opens once a driver has accepted the order. */}
+                  {o.assignedDriverId && (o.status === 'driver_assigned' || o.status === 'picked_up') && (
+                    <Button
+                      label="Chat"
+                      icon="chatbubble-outline"
+                      compact
+                      variant="secondary"
+                      onPress={() => openForOrder(o.id)}
+                    />
+                  )}
+                  {!isReady && (
+                    <Button label="Mark ready" compact variant="secondary" onPress={() => markOrderReady(o.id)} />
+                  )}
+                </View>
               </View>
             </Card>
           );

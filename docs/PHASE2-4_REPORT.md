@@ -75,3 +75,26 @@ pricing_config, orders, batches, batch_declines, kyc_documents, files, driver_on
 4. **New app build**: the camera and photo library use `expo-image-picker`, and GPS uses `expo-location`. Both are native modules. Make a new development build (`npx expo run:ios` or `eas build --profile development`). Expo Go also includes it, so Expo Go works for testing.
 5. **Deploy**: push to GitHub → Render redeploys → migrations 002 and 003 run on start.
 6. **Background location (later, optional)**: GPS is only sent while the app is open. Tracking with the app in the background needs a development build with background location enabled and App Store / Play Store justification.
+
+## Chat between restaurants and drivers (real time)
+
+- **Where:** a new **Messages** screen in the menu for restaurants and drivers (inbox), plus shortcuts:
+  - Restaurant → Live orders → **Chat** button on an order once a driver has accepted it.
+  - Driver → Drive → chat icon next to Call and Navigate on the current stop.
+- **When chat is allowed:** while the driver has an accepted order from that restaurant (assigned, picked up, or delivered in the last hour). After that the thread stays in the inbox as read-only history ("Past chats").
+- **Real time:** messages are sent over HTTPS and arrive instantly over a WebSocket at `wss://<api>/ws`. The socket reconnects on its own, and when it reconnects the app catches up on anything missed.
+- **Online status:** while the app is open the socket is connected, so the other side sees **Online** (green dot). When the app goes to the background or is closed, they see **"Active 5 min ago" / "Active 2 hours ago"**. It switches back to Online as soon as the app is opened again.
+- **Inbox:** unread counts, last message preview, "Seen" on your last message, and a red badge on the menu.
+- **Call icon** in the chat header (and on the driver's current stop) shows the other side's number in a pop-up. **Call** opens the phone's dialer.
+- **API:** `GET /api/chat/conversations`, `POST /api/chat/open {orderId}`, `GET|POST /api/chat/conversations/:id/messages`, `POST /api/chat/conversations/:id/read`.
+- **Database:** migration `004_chat.sql` (conversations, messages, `users.last_seen_at`).
+- **Scaling note:** online status is kept in the server's memory. That is fine on one Render instance; several instances would need Redis.
+
+## Driver past orders
+
+- **Past orders** screen in the driver menu (also linked from Earnings → "All past orders"):
+  - Total earned and number of deliveries.
+  - Every delivered order with its pay.
+  - Tap an order for its details: restaurant, drop-off area, distance, position in the run, item count, accepted / picked-up / delivered times, and minutes on the road.
+- In-house orders show "Paid by restaurant", because the platform does not pay for them.
+- **API:** `GET /api/driver/history?before=<time>` (30 per page).

@@ -20,4 +20,14 @@ const scanLimiter = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'Too many scans. Try again in a few minutes.' } },
 });
 
-module.exports = { authLimiter, scanLimiter };
+// Generous for real conversations, stops a stuck client flooding a thread.
+const chatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { error: { code: 'RATE_LIMITED', message: 'You are sending messages too fast. Please wait a moment.' } },
+});
+
+module.exports = { authLimiter, scanLimiter, chatLimiter };

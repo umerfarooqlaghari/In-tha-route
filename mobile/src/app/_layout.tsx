@@ -4,6 +4,7 @@ import React, { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Brand } from '@/constants/brand';
+import { ChatProvider } from '@/context/ChatContext';
 import { InThaRouteProvider } from '@/context/InThaRouteContext';
 
 SplashScreen.preventAutoHideAsync();
@@ -28,11 +29,13 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <InThaRouteProvider>
-        <ThemeProvider value={theme}>
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="index" />
-          </Stack>
-        </ThemeProvider>
+        <ChatProvider>
+          <ThemeProvider value={theme}>
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="index" />
+            </Stack>
+          </ThemeProvider>
+        </ChatProvider>
       </InThaRouteProvider>
     </SafeAreaProvider>
   );

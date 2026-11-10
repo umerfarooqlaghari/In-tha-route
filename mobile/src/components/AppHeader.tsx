@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar, IconButton } from '@/components/ui';
 import { Brand } from '@/constants/brand';
 import { PERSONAS } from '@/constants/personas';
+import { useChat } from '@/context/ChatContext';
 import { ROLE_SCREENS, useInThaRoute } from '@/context/InThaRouteContext';
 
 const C = Brand.colors;
@@ -22,6 +23,7 @@ const C = Brand.colors;
 export function AppHeader() {
   const insets = useSafeAreaInsets();
   const { role, activeScreen, user } = useInThaRoute();
+  const { unreadTotal } = useChat();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const screen = ROLE_SCREENS[role].find((s) => s.key === activeScreen) ?? ROLE_SCREENS[role][0];
@@ -32,7 +34,10 @@ export function AppHeader() {
   return (
     <>
         <View style={[styles.header, { paddingTop: topPad }]}>
-          <IconButton icon="menu" onPress={() => setDrawerOpen(true)} />
+          <View>
+            <IconButton icon="menu" onPress={() => setDrawerOpen(true)} />
+            {unreadTotal > 0 && <View style={styles.menuDot} pointerEvents="none" />}
+          </View>
           <View style={styles.titleWrap}>
             <Text style={styles.title} numberOfLines={1}>
               {screen.title}
@@ -55,6 +60,7 @@ export function AppHeader() {
       const {width} = useWindowDimensions();
       const drawerWidth = Math.min(320, width * 0.84);
       const {role, activeScreen, setActiveScreen, logout, user, screens} = useInThaRoute();
+      const {unreadTotal} = useChat();
       const persona = PERSONAS[role];
       const profileName = user?.fullName ?? persona.name;
       const profileOrg = user ? user.restaurant?.name ?? persona.label : persona.org;
@@ -151,6 +157,11 @@ export function AppHeader() {
                       {s.subtitle}
                     </Text>
                   </View>
+                  {s.key === 'messages' && unreadTotal > 0 && (
+                    <View style={styles.navBadge}>
+                      <Text style={styles.navBadgeText}>{unreadTotal > 99 ? '99+' : unreadTotal}</Text>
+                    </View>
+                  )}
                 </Pressable>
               );
             })}
@@ -236,4 +247,25 @@ export function AppHeader() {
       borderRadius: Brand.radius.md,
   },
       logoutText: {...Brand.type.bodyStrong, color: C.ink2 },
+      menuDot: {
+        position: 'absolute',
+        top: 6,
+        right: 6,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: C.primary,
+        borderWidth: 2,
+        borderColor: C.surface,
+      },
+      navBadge: {
+        minWidth: 22,
+        height: 22,
+        paddingHorizontal: 6,
+        borderRadius: 11,
+        backgroundColor: C.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+      },
+      navBadgeText: {color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
 });

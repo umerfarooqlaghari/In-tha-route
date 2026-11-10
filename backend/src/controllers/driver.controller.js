@@ -103,6 +103,12 @@ async function setAvailability(req, res) {
   res.json({ dashboard: await buildDashboard(req.user) });
 }
 
+/** Past deliveries with pay, newest first. */
+async function orderHistory(req, res) {
+  const { before, limit } = parse(v.historySchema, req.query);
+  res.json(await drivers.history(req.user.driver_id, { before, limit }));
+}
+
 /** The app sends its GPS position while open; no dashboard in the reply to keep it light. */
 async function updateLocation(req, res) {
   const location = parse(v.locationSchema, req.body);
@@ -155,6 +161,7 @@ module.exports = {
   dashboard,
   setAvailability,
   updateLocation,
+  orderHistory,
   acceptBatch,
   declineBatch,
   advanceStop,

@@ -94,6 +94,11 @@ const locationSchema = z.object({
   longitude: z.number({ error: 'longitude is required.' }).min(-180).max(180),
 });
 
+const historySchema = z.object({
+  before: z.iso.datetime({ offset: true }).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(30),
+});
+
 const rejectSchema = z.object({ reason: z.string().trim().max(300).optional() });
 const uuidSchema = z.uuid('Invalid id.');
 
@@ -105,6 +110,7 @@ module.exports = {
   availabilitySchema,
   pricingSchema,
   locationSchema,
+  historySchema,
   rejectSchema,
   uuidSchema,
 };

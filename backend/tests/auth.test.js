@@ -73,7 +73,7 @@ after(async () => {
 describe('migrations', () => {
   test('apply cleanly on an empty database', async () => {
     const ran = await runMigrations(pool, () => {});
-    assert.deepEqual(ran, ['001_auth.sql', '002_operations.sql', '003_driver_location.sql']);
+    assert.deepEqual(ran, ['001_auth.sql', '002_operations.sql', '003_driver_location.sql', '004_chat.sql']);
     const { rows } = await pool.query(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1`
     );
@@ -82,10 +82,12 @@ describe('migrations', () => {
       [
         'batch_declines',
         'batches',
+        'conversations',
         'driver_online_sessions',
         'driver_profiles',
         'files',
         'kyc_documents',
+        'messages',
         'orders',
         'pricing_config',
         'refresh_tokens',

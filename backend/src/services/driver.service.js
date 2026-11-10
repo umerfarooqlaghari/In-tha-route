@@ -150,6 +150,70 @@ const shortArea = (address) => {
   return parts[parts.length - 1] || 'Delivery';
 };
 
+/**
+ * Delivered orders, newest first, with what each one paid.
+ * `before` (ISO time of the last row shown) loads the next page.
+ */
+async function history(driverId, { before, limit = 30 } = {}) {
+  const now = new Date();
+  const [page, totals] = await Promise.all([
+    db.query(
+      `SELECT o.id, o.source, o.external_order_id, o.delivery_address, o.postcode, o.distance_miles,
+              o.driver_payout_gbp, o.dispatch_type, o.batch_position, o.items, o.created_at,
+              o.picked_up_at, o.delivered_at, r.name AS restaurant_name, r.address AS restaurant_address,
+              r.postcode AS restaurant_postcode, b.accepted_at,
+              (SELECT count(*)::int FROM orders x WHERE x.batch_id = o.batch_id) AS batch_size
+         FROM orders o
+         JOIN restaurants r ON r.id = o.restaurant_id
+         LEFT JOIN batches b ON b.id = o.batch_id
+        WHERE o.assigned_driver_id = $1 AND o.status = 'delivered'
+          AND ($2::timestamptz IS NULL OR o.delivered_at < $2)
+        ORDER BY o.delivered_at DESC
+        LIMIT $3`,
+      [driverId, before || null, limit]
+    ),
+    db.query(
+      `SELECT count(*)::int AS orders, coalesce(sum(driver_payout_gbp), 0) AS total
+         FROM orders WHERE assigned_driver_id = $1 AND status = 'delivered'`,
+      [driverId]
+    ),
+  ]);
+
+  const minutesBetween = (a, b) => (a && b ? Math.max(1, Math.round((new Date(b) - new Date(a)) / 60000)) : null);
+  const orders = page.rows.map((o) => {
+    const items = Array.isArray(o.items) ? o.items : [];
+    return {
+      id: o.id,
+      source: o.source,
+      externalOrderId: o.external_order_id,
+      restaurantName: o.restaurant_name,
+      restaurantAddress: o.restaurant_address,
+      restaurantPostcode: o.restaurant_postcode,
+      // Customers' full details are not kept on the driver's history.
+      deliveryArea: shortArea(o.delivery_address),
+      postcode: o.postcode,
+      distanceMiles: Number(o.distance_miles),
+      payoutGbp: Number(o.driver_payout_gbp),
+      dispatchType: o.dispatch_type,
+      batchPosition: o.batch_position,
+      batchSize: o.batch_size,
+      itemCount: items.reduce((n, i) => n + (Number(i.quantity) || 0), 0),
+      acceptedAt: o.accepted_at ? new Date(o.accepted_at).toISOString() : null,
+      pickedUpAt: o.picked_up_at ? new Date(o.picked_up_at).toISOString() : null,
+      deliveredAt: new Date(o.delivered_at).toISOString(),
+      deliveredLabel: tripTimeLabel(o.delivered_at, now),
+      // Collected -> delivered.
+      deliveryMinutes: minutesBetween(o.picked_up_at, o.delivered_at),
+    };
+  });
+
+  return {
+    orders,
+    totals: { orders: totals.rows[0].orders, earnedGbp: Number(Number(totals.rows[0].total).toFixed(2)) },
+    nextBefore: orders.length === limit ? orders[orders.length - 1].deliveredAt : null,
+  };
+}
+
 /** Figures for the driver's Earnings screen: the last seven days, ending today. */
 async function earnings(driverRow) {
   const driverId = driverRow.id;
@@ -219,5 +283,6 @@ module.exports = {
   updateLocation,
   freshLocation,
   earnings,
+  history,
   shortArea,
 };
