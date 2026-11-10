@@ -20,7 +20,7 @@ import {
   Stepper,
 } from '@/components/ui';
 import { API_URL } from '@/constants/api';
-import { Brand, formatGbp } from '@/constants/brand';
+import { Brand, formatGbp, sourceColor } from '@/constants/brand';
 import { coordsForPostcode } from '@/constants/geo';
 import { DriverPolicy, DriverProfile, KycDocument, useInThaRoute } from '@/context/InThaRouteContext';
 import { getAccessToken } from '@/services/apiClient';
@@ -78,6 +78,7 @@ function OverviewScreen() {
       id: o.id,
       kind: 'dropoff' as const,
       label: `${i + 1}`,
+      color: sourceColor(o.source),
       coordinate: coordsForPostcode(o.postcode),
     })),
   ];

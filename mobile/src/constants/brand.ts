@@ -37,11 +37,11 @@ export const Brand = {
     info: '#2F6FED',
     infoSoft: '#EEF3FE',
 
-    // Order sources
-    deliveroo: '#00A8A0',
-    uberEats: '#06C167',
-    eatPresto: '#7A5AF8',
-    justEat: '#FF8000',
+    // Order sources (badge dots and drop-off pins)
+    deliveroo: '#16A34A', // green
+    uberEats: '#000000', // black
+    eatPresto: '#7A5AF8', // purple: restaurant's own (direct) orders
+    justEat: '#FF8000', // orange
   },
   radius: {
     sm: 8,
@@ -94,6 +94,9 @@ export const SOURCE_COLORS: Record<SourceKey, string> = {
   'Eat Presto POS': Brand.colors.eatPresto,
   'Just Eat': Brand.colors.justEat,
 };
+
+/** Colour for an order's source; anything not from a delivery app counts as a direct order. */
+export const sourceColor = (source: string) => SOURCE_COLORS[source as SourceKey] ?? Brand.colors.eatPresto;
 
 export const formatGbp = (value: number) => `£${value.toFixed(2)}`;
 

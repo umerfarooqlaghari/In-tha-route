@@ -20,7 +20,7 @@ import {
   SourceBadge,
   Stat,
 } from '@/components/ui';
-import { Brand, formatCountdown, formatGbp } from '@/constants/brand';
+import { Brand, formatCountdown, formatGbp, sourceColor } from '@/constants/brand';
 import { coordsForPostcode, DRIVER_START, LatLng } from '@/constants/geo';
 import { KycDocument, LiveOrder, useInThaRoute } from '@/context/InThaRouteContext';
 import { chooseImage } from '@/utils/pickImage';
@@ -159,6 +159,7 @@ function DriveScreen() {
       list.push({
         id: s.key,
         kind: s.type,
+        color: s.type === 'dropoff' ? sourceColor(s.order.source) : undefined,
         coordinate: s.coordinate,
         label: s.type === 'dropoff' ? `${s.order.batchPosition ?? 1}` : undefined,
         active: navigating && i === stopIndex,
@@ -446,6 +447,7 @@ function OrderPoolScreen() {
       id: o.id,
       kind: 'dropoff' as const,
       label: `${i + 1}`,
+      color: sourceColor(o.source),
       coordinate: coordsForPostcode(o.postcode),
     })),
   ];
@@ -524,7 +526,7 @@ function OrderPoolScreen() {
               </View>
               <Divider />
               <View style={styles.rowBetween}>
-                <Text style={styles.muted} numberOfLines={1}>
+                <Text style={styles.poolMeta} numberOfLines={1}>
                   {o.distanceMiles} mi ·{' '}
                   {o.remainingSeconds > 0 ? `Ready ${formatCountdown(o.remainingSeconds)}` : 'Ready'}
                 </Text>
@@ -844,6 +846,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   indexText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  poolMeta: { fontSize: 17, fontWeight: '600', color: C.ink, flexShrink: 1, fontVariant: ['tabular-nums'] },
   earn: { ...Brand.type.heading, color: C.success },
   toast: {
     flexDirection: 'row',

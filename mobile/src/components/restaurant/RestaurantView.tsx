@@ -22,7 +22,7 @@ import {
   SourceBadge,
   Stat,
 } from '@/components/ui';
-import { Brand, formatCountdown, formatGbp } from '@/constants/brand';
+import { Brand, formatCountdown, formatGbp, sourceColor } from '@/constants/brand';
 import { coordsForPostcode } from '@/constants/geo';
 import {
   DriverPolicy,
@@ -228,7 +228,12 @@ function NewOrderScreen() {
                   kind: 'pickup',
                   coordinate: coordsForPostcode(template.restaurantPostcode),
                 },
-                { id: 'd', kind: 'dropoff', coordinate: coordsForPostcode(postcode) },
+                {
+                  id: 'd',
+                  kind: 'dropoff',
+                  color: sourceColor(template.source),
+                  coordinate: coordsForPostcode(postcode),
+                },
               ]}
               route={[coordsForPostcode(template.restaurantPostcode), coordsForPostcode(postcode)]}
             />
@@ -428,7 +433,13 @@ function orderPins(orders: LiveOrder[]): MapPin[] {
       seen.add(o.restaurantPostcode);
       pins.push({ id: `r-${o.restaurantPostcode}`, kind: 'restaurant', coordinate: coordsForPostcode(o.restaurantPostcode) });
     }
-    pins.push({ id: `d-${o.id}`, kind: 'dropoff', label: `${i + 1}`, coordinate: coordsForPostcode(o.postcode) });
+    pins.push({
+      id: `d-${o.id}`,
+      kind: 'dropoff',
+      label: `${i + 1}`,
+      color: sourceColor(o.source),
+      coordinate: coordsForPostcode(o.postcode),
+    });
   });
   return pins;
 }

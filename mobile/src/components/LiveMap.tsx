@@ -14,6 +14,8 @@ export interface MapPin {
   kind: MapPinKind;
   label?: string;
   active?: boolean;
+  /** Overrides the pin colour (drop-offs use the order source's colour). */
+  color?: string;
 }
 
 interface LiveMapProps {
@@ -35,6 +37,7 @@ const PIN_META: Record<MapPinKind, { color: string; icon: keyof typeof Ionicons.
 
 function Pin({ pin }: { pin: MapPin }) {
   const meta = PIN_META[pin.kind];
+  const color = pin.color ?? meta.color;
   if (pin.kind === 'driver') {
     return (
       <View style={styles.driverHalo}>
@@ -49,7 +52,7 @@ function Pin({ pin }: { pin: MapPin }) {
       <View
         style={[
           styles.pin,
-          { backgroundColor: meta.color },
+          { backgroundColor: color },
           pin.active && styles.pinActive,
         ]}>
         {pin.label ? (
@@ -58,7 +61,7 @@ function Pin({ pin }: { pin: MapPin }) {
           <Ionicons name={meta.icon} size={13} color="#FFFFFF" />
         )}
       </View>
-      <View style={[styles.pinTail, { borderTopColor: meta.color }]} />
+      <View style={[styles.pinTail, { borderTopColor: color }]} />
     </View>
   );
 }
