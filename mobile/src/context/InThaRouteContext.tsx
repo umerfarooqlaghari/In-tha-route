@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
+import { AuthSession, AuthUser, logoutRequest } from '@/services/authApi';
+
 export type UserRole = 'restaurant' | 'driver' | 'admin';
 
 export type OrderSource = 'Deliveroo' | 'Uber Eats' | 'Eat Presto POS' | 'Just Eat';
@@ -608,6 +610,10 @@ interface InThaRouteContextType {
   role: UserRole;
   activeScreen: string;
   setActiveScreen: (screen: string) => void;
+  /** The signed-in account, as returned by the API. */
+  user: AuthUser | null;
+  /** Enter the app with a session from the signup or login API. */
+  signIn: (session: AuthSession) => void;
   loginAsRole: (role: UserRole) => void;
   logout: () => void;
   orders: LiveOrder[];
@@ -657,6 +663,7 @@ const InThaRouteContext = createContext<InThaRouteContextType | undefined>(undef
 
 export function InThaRouteProvider({ children }: { children: React.ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [role, setRoleState] = useState<UserRole>('restaurant');
   const [activeScreen, setActiveScreen] = useState<string>('scan_receipt');
   const [orders, setOrders] = useState<LiveOrder[]>(INITIAL_ORDERS);
@@ -676,7 +683,15 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
     setIsLoggedIn(true);
   };
 
+  // The role always comes from the server's response, never from a choice in the UI.
+  const signIn = (next: AuthSession) => {
+    setSession(next);
+    loginAsRole(next.user.role);
+  };
+
   const logout = () => {
+    if (session) logoutRequest(session.tokens.refreshToken);
+    setSession(null);
     setIsLoggedIn(false);
   };
 
@@ -1043,6 +1058,8 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         role,
         activeScreen,
         setActiveScreen,
+        user: session?.user ?? null,
+        signIn,
         loginAsRole,
         logout,
         orders,

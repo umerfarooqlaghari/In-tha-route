@@ -428,11 +428,20 @@ export function EmptyState({ icon, title, subtitle }: { icon: IconName; title: s
 /* Inputs                                                                      */
 /* -------------------------------------------------------------------------- */
 
-export function Field({ label, ...props }: TextInputProps & { label: string }) {
+export function Field({
+  label,
+  error,
+  ...props
+}: TextInputProps & { label: string; error?: string }) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput placeholderTextColor={C.ink3} style={styles.fieldInput} {...props} />
+      <TextInput
+        placeholderTextColor={C.ink3}
+        style={[styles.fieldInput, !!error && styles.fieldInputError]}
+        {...props}
+      />
+      {!!error && <Text style={styles.fieldError}>{error}</Text>}
     </View>
   );
 }
@@ -598,6 +607,8 @@ const styles = StyleSheet.create({
 
   field: { gap: 6 },
   fieldLabel: { ...Brand.type.captionStrong, color: C.ink2 },
+  fieldInputError: { borderWidth: 1, borderColor: C.primary },
+  fieldError: { ...Brand.type.caption, color: C.primary },
   fieldInput: {
     height: 50,
     borderRadius: Brand.radius.md,

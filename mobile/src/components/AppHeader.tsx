@@ -21,7 +21,7 @@ const C = Brand.colors;
 
 export function AppHeader() {
   const insets = useSafeAreaInsets();
-  const { role, activeScreen } = useInThaRoute();
+  const { role, activeScreen, user } = useInThaRoute();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const screen = ROLE_SCREENS[role].find((s) => s.key === activeScreen) ?? ROLE_SCREENS[role][0];
@@ -42,7 +42,7 @@ export function AppHeader() {
             </Text>
           </View>
           <Pressable onPress={() => setDrawerOpen(true)} hitSlop={8}>
-            <Avatar name={persona.name} tone="primary" size={40} />
+            <Avatar name={user?.fullName ?? persona.name} tone="primary" size={40} />
           </Pressable>
         </View>
         <Drawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} />
@@ -54,8 +54,10 @@ export function AppHeader() {
   const insets = useSafeAreaInsets();
       const {width} = useWindowDimensions();
       const drawerWidth = Math.min(320, width * 0.84);
-      const {role, activeScreen, setActiveScreen, loginAsRole, logout} = useInThaRoute();
+      const {role, activeScreen, setActiveScreen, loginAsRole, logout, user} = useInThaRoute();
       const persona = PERSONAS[role];
+      const profileName = user?.fullName ?? persona.name;
+      const profileOrg = user ? user.restaurant?.name ?? persona.label : persona.org;
 
       const translateX = useRef(new Animated.Value(-drawerWidth)).current;
       const fade = useRef(new Animated.Value(0)).current;
@@ -110,13 +112,13 @@ export function AppHeader() {
           ]}>
           {/* Profile */}
           <View style={styles.profile}>
-            <Avatar name={persona.name} tone="primary" size={52} />
+            <Avatar name={profileName} tone="primary" size={52} />
             <View style={styles.profileText}>
               <Text style={styles.profileName} numberOfLines={1}>
-                {persona.name}
+                {profileName}
               </Text>
               <Text style={styles.profileOrg} numberOfLines={1}>
-                {persona.org}
+                {profileOrg}
               </Text>
             </View>
           </View>
