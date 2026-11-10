@@ -1,57 +1,29 @@
-const express = require('express');
-const cors = require('cors');
-const swaggerUi = require('swagger-ui-express');
-const swaggerJsdoc = require('swagger-jsdoc');
-require('dotenv').config();
+const app = require('./app');
+const { pool } = require('./config/db');
+const { runMigrations } = require('./db/migrate');
+const { seedAdmin } = require('./db/seedAdmin');
 
-const routes = require('./routes');
-
-const app = express();
 const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+async function start() {
+  // For hosts without a shell (e.g. Render's free plan): migrate, and seed the
+  // admin when its credentials are configured, before accepting traffic.
+  if (process.env.AUTO_MIGRATE === 'true') {
+    await runMigrations(pool);
+    if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+      await seedAdmin(pool);
+    }
+  }
 
-// Swagger setup (development only)
-if (NODE_ENV === 'development') {
-  const swaggerOptions = {
-    definition: {
-      openapi: '3.0.0',
-      info: {
-        title: 'InThaRoute API',
-        version: '1.0.0',
-        description: 'InThaRoute Backend API Documentation',
-      },
-      servers: [
-        {
-          url: `http://localhost:${PORT}`,
-          description: 'Development server',
-        },
-      ],
-    },
-    apis: ['./src/routes/*.js', './src/controllers/*.js'],
-  };
-
-  const swaggerSpec = swaggerJsdoc(swaggerOptions);
-  app.use('/swagger', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-  console.log(`Swagger docs: http://localhost:${PORT}/swagger`);
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Environment: ${NODE_ENV}`);
+    if (NODE_ENV === 'development') console.log(`Swagger docs: http://localhost:${PORT}/swagger`);
+  });
 }
 
-// Routes
-app.use('/api', routes);
-
-// Health check
-app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'InThaRoute API is running' });
+start().catch((err) => {
+  console.error('Failed to start:', err.message);
+  process.exit(1);
 });
-
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Environment: ${NODE_ENV}`);
-});
-
-module.exports = app;

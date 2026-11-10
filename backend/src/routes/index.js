@@ -3,6 +3,8 @@ const db = require('../config/db');
 
 const router = express.Router();
 
+router.use('/auth', require('./auth.routes'));
+
 /**
  * @swagger
  * /api/health:
