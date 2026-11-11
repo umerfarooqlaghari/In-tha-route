@@ -127,7 +127,9 @@ export function LiveMap({
         )}
         {pins.map((pin) => (
           <Marker
-            key={pin.id}
+            // Android draws a marker once (tracksViewChanges is off), so anything that changes its
+            // look is part of the key and the marker is redrawn.
+            key={`${pin.id}:${pin.label ?? ''}:${pin.color ?? ''}:${pin.active ? 1 : 0}`}
             coordinate={pin.coordinate}
             anchor={{ x: 0.5, y: pin.kind === 'driver' ? 0.5 : 1 }}
             tracksViewChanges={false}>

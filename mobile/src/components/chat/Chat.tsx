@@ -6,7 +6,6 @@ import {
   KeyboardAvoidingView,
   Linking,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -250,7 +249,7 @@ function ChatThread({ id, onClose }: { id: string; onClose: () => void }) {
   return (
     <KeyboardAvoidingView
       style={styles.threadRoot}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      behavior="padding">
       {/* Header */}
       <View style={[styles.threadHeader, { paddingTop: Math.max(insets.top, 20) + 8 }]}>
         <IconButton icon="chevron-back" label="Close chat" testID="chat-close" onPress={onClose} />

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LiveMap, MapPin } from '@/components/LiveMap';
@@ -182,8 +182,14 @@ function DriveScreen() {
         : [driverPos, ...stops.slice(navigating ? stopIndex : 0).map((s) => s.coordinate)]
       : undefined;
 
-  const openNavigation = (c: LatLng) =>
-    Linking.openURL(`maps://?daddr=${c.latitude},${c.longitude}&dirflg=d`).catch(() => {});
+  // Turn-by-turn in the phone's own maps app: Apple Maps on iOS, Google Maps on Android
+  // (falling back to the web link, which any maps app or the browser can open).
+  const openNavigation = (c: LatLng) => {
+    const to = `${c.latitude},${c.longitude}`;
+    const web = `https://www.google.com/maps/dir/?api=1&destination=${to}&travelmode=driving`;
+    const native = Platform.OS === 'ios' ? `maps://?daddr=${to}&dirflg=d` : `google.navigation:q=${to}&mode=d`;
+    Linking.openURL(native).catch(() => Linking.openURL(web).catch(() => {}));
+  };
 
   const totalPay = batch.reduce((sum, o) => sum + o.driverPayoutGbp, 0);
   const totalMiles = batch.reduce((sum, o) => sum + o.distanceMiles, 0);
