@@ -1,0 +1,57 @@
+# Wrong password is refused; each role signs in to its own home screen.
+appId: host.exp.Exponent
+---
+- runFlow: ../common/open-app.yaml
+- runFlow: ../common/logout.yaml
+- tapOn: "Log in"
+- tapOn:
+    id: "login-email"
+- eraseText: 40
+- inputText: "admin@e2e.test"
+- tapOn:
+    id: "login-password"
+- eraseText: 30
+- inputText: "WrongPass999"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*(incorrect|Invalid|wrong).*"
+    timeout: 15000
+- assertNotVisible:
+    id: "open-menu"
+- tapOn:
+    id: "login-password"
+- eraseText: 20
+- inputText: "E2ePass123"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      id: "open-menu"
+    timeout: 10000
+    optional: true
+- repeat:
+    while:
+      notVisible:
+        id: "open-menu"
+    times: 4
+    commands:
+      - longPressOn:
+          point: "31%,64%"
+      - extendedWaitUntil:
+          visible:
+            id: "open-menu"
+          timeout: 6000
+          optional: true
+- extendedWaitUntil:
+    visible: "Overview"
+    timeout: 30000
+- assertVisible: "Admin"
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: rest@e2e.test
+- assertVisible: "Restaurant"
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: driver1@e2e.test
+- assertVisible: "Drive"

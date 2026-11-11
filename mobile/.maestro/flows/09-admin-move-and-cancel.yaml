@@ -1,0 +1,51 @@
+# Admin takes an order off its driver (back to the pool), and cancels another.
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: acceptedOrder
+- evalScript: ${output.moveRef = output.orderRef}
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: poolOrder
+- evalScript: ${output.cancelRef = output.orderRef}
+- runFlow: ../common/open-app.yaml
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: admin@e2e.test
+- extendedWaitUntil:
+    visible: ".*${output.moveRef}.*"
+    timeout: 20000
+- assertVisible: "Driver on the way · Maya"
+- tapOn: "Move driver"
+- extendedWaitUntil:
+    visible: "Move ${output.moveRef} to another driver?"
+    timeout: 5000
+- tapOn: "Move"
+- extendedWaitUntil:
+    notVisible: "Move driver"
+    timeout: 15000
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: orderStatus
+      REF: ${output.moveRef}
+- assertTrue: ${output.status == 'preparing' || output.status == 'ready_for_pickup'}
+# Cancel the order waiting for a driver
+- tapOn:
+    text: "Cancel"
+    index: 0
+- extendedWaitUntil:
+    visible: "Cancel .*\\?"
+    timeout: 5000
+- tapOn: "Cancel order"
+- extendedWaitUntil:
+    notVisible: "Cancel order"
+    timeout: 10000

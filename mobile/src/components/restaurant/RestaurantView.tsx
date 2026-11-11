@@ -517,6 +517,8 @@ function LiveOrdersScreen() {
           const isReady = o.remainingSeconds === 0 || o.status === 'ready_for_pickup';
           const meta = isReady ? STATUS_META.ready_for_pickup : STATUS_META[o.status];
           const urgent = !isReady && o.remainingSeconds < 180;
+          // Chat opens once a driver has accepted the order.
+          const showChat = !!o.assignedDriverId && (o.status === 'driver_assigned' || o.status === 'picked_up');
           return (
             <Card key={o.id}>
               <View style={styles.rowBetween}>
@@ -567,38 +569,49 @@ function LiveOrdersScreen() {
 
               <Divider />
 
-              <View style={styles.rowBetween}>
-                <View style={styles.rowGapShrink}>
-                  <Badge label={meta.label} tone={meta.tone} />
-                  {o.assignedDriverName ? (
-                    <Text style={styles.muted} numberOfLines={1}>
-                      {o.assignedDriverName.split(' ')[0]}
+              <View style={styles.statusLine}>
+                <Badge label={meta.label} tone={meta.tone} />
+                {o.assignedDriverName ? (
+                  <View style={styles.driverLine}>
+                    <Ionicons name="person-outline" size={14} color={C.ink2} />
+                    <Text style={styles.driverName} numberOfLines={1}>
+                      {o.assignedDriverName}
                     </Text>
-                  ) : null}
-                </View>
-                <View style={styles.rowGap}>
-                  {/* Chat opens once a driver has accepted the order. */}
-                  {o.assignedDriverId && (o.status === 'driver_assigned' || o.status === 'picked_up') && (
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Equal-width actions, so the row looks the same whichever ones apply. */}
+              {(showChat || !isReady) && (
+                <View style={styles.orderActions}>
+                  {showChat && (
                     <Button
                       label="Chat"
                       icon="chatbubble-outline"
                       compact
                       variant="secondary"
+                      style={styles.orderAction}
                       onPress={() => openForOrder(o.id)}
                     />
                   )}
                   {!isReady && (
-                    <Button label="Mark ready" compact variant="secondary" onPress={() => markOrderReady(o.id)} />
+                    <Button
+                      label="Mark ready"
+                      icon="checkmark"
+                      compact
+                      variant="secondary"
+                      style={styles.orderAction}
+                      onPress={() => markOrderReady(o.id)}
+                    />
                   )}
                 </View>
-              </View>
+              )}
               {canCancel(o) && (
                 <Button
                   label="Cancel order"
                   icon="close"
                   compact
                   variant="ghost"
-                  style={styles.cancelButton}
                   onPress={() => confirmCancel(o, cancelOrder)}
                 />
               )}
@@ -852,7 +865,11 @@ const styles = StyleSheet.create({
     backgroundColor: C.primarySoft,
   },
   attentionText: { ...Brand.type.caption, color: C.ink, flex: 1 },
-  cancelButton: { alignSelf: 'flex-start' },
+  statusLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  driverLine: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1, minWidth: 0 },
+  driverName: { ...Brand.type.captionStrong, color: C.ink2, flexShrink: 1 },
+  orderActions: { flexDirection: 'row', gap: 8 },
+  orderAction: { flex: 1 },
   mutedStrong: { ...Brand.type.captionStrong, color: C.ink2, flexShrink: 1 },
   fieldLabel: { ...Brand.type.captionStrong, color: C.ink2 },
 

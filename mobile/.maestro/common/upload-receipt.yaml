@@ -1,0 +1,41 @@
+# New order -> Upload receipt -> picks the test receipt from Photos and waits for the
+# details (one Gemini call).
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: go.yaml
+    env:
+      SCREEN: scan_receipt
+- tapOn: "Upload receipt"
+- runFlow:
+    when:
+      visible: "Allow Full Access"
+    commands:
+      - tapOn: "Allow Full Access"
+# The system photo picker runs outside the app and Maestro cannot always read it, so the
+# waits are optional and the tap falls back to the first cell's position (newest photo =
+# the test receipt).
+- extendedWaitUntil:
+    visible: "Photos"
+    timeout: 20000
+    optional: true
+- extendedWaitUntil:
+    visible: "Photo.*"
+    timeout: 10000
+    optional: true
+- runFlow:
+    when:
+      visible: "Photo.*"
+    commands:
+      - tapOn:
+          text: "Photo.*"
+          index: 0
+- runFlow:
+    when:
+      notVisible: "Photo.*"
+    commands:
+      - tapOn:
+          point: "16%,46%"
+- extendedWaitUntil:
+    visible: "Continue"
+    timeout: 90000

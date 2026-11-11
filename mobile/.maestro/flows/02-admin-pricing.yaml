@@ -1,0 +1,82 @@
+# Admin changes fees and limits; they save at once and the simulator follows.
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
+- runFlow: ../common/open-app.yaml
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: admin@e2e.test
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: pricing_algorithm
+- extendedWaitUntil:
+    visible: "Batch simulator"
+    timeout: 15000
+- assertVisible:
+    id: "restaurant-fee-value"
+    text: "£5.00"
+- tapOn:
+    id: "restaurant-fee-plus"
+- tapOn:
+    id: "restaurant-fee-plus"
+- extendedWaitUntil:
+    visible:
+      id: "restaurant-fee-value"
+      text: "£5.50"
+    timeout: 10000
+# 2 orders: restaurants pay 2 x 5.50
+- tapOn: "2"
+- extendedWaitUntil:
+    visible: "£11.00"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: "max-batch-plus"
+- tapOn:
+    id: "max-batch-plus"
+- extendedWaitUntil:
+    visible:
+      id: "max-batch-value"
+      text: "6"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: "driver-radius-plus"
+- tapOn:
+    id: "driver-radius-plus"
+- extendedWaitUntil:
+    visible:
+      id: "driver-radius-value"
+      text: "3.5 mi"
+    timeout: 10000
+- tapOn:
+    id: "extra-mile-restaurant-plus"
+- extendedWaitUntil:
+    visible:
+      id: "extra-mile-restaurant-value"
+      text: "£1.30"
+    timeout: 10000
+# Saved on the server
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: check
+      PATH: algorithm.maxBatchSize
+- assertTrue: ${output.value == '6'}
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: check
+      PATH: algorithm.offerRadiusMiles
+- assertTrue: ${output.value == '3.5'}
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: check
+      PATH: algorithm.baseRestaurantChargeGbp
+- assertTrue: ${output.value == '5.5'}

@@ -1,0 +1,35 @@
+# Scan 1 of 2 (Gemini): a receipt is read and posted for platform drivers.
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
+- addMedia:
+    - "../assets/test-receipt.jpg"
+- runFlow: ../common/open-app.yaml
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: rest@e2e.test
+- runFlow: ../common/upload-receipt.yaml
+# What Gemini read off the receipt
+- assertVisible: "Emma Wilson"
+- assertVisible: ".*Rosemont.*"
+- assertVisible: ".*TW10 6QN.*"
+- tapOn: "Continue"
+- extendedWaitUntil:
+    visible: "Who delivers?"
+    timeout: 10000
+- tapOn: "Platform driver"
+- assertVisible: "Delivery fee"
+- tapOn: "Post order"
+- extendedWaitUntil:
+    visible: "Order is live"
+    timeout: 30000
+- tapOn: "View live orders"
+- extendedWaitUntil:
+    visible: "Emma Wilson"
+    timeout: 15000
+- assertVisible: "Finding driver|Ready"
+- assertVisible: "Cancel order"

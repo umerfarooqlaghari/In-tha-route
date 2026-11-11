@@ -1,0 +1,34 @@
+# A new driver's documents are reviewed and approved.
+appId: host.exp.Exponent
+---
+- runFlow: ../common/open-app.yaml
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: admin@e2e.test
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: driver_kyc
+- extendedWaitUntil:
+    visible: "Tom Reed"
+    timeout: 15000
+- runFlow:
+    when:
+      notVisible: "Approve driver"
+    commands:
+      - tapOn:
+          text: ".*of .* documents"
+          below: "Tom Reed"
+- scrollUntilVisible:
+    element: "Approve driver"
+- tapOn: "Approve driver"
+- runFlow:
+    when:
+      visible: "Approve"
+    commands:
+      - tapOn: "Approve"
+- extendedWaitUntil:
+    notVisible: "Approve driver"
+    timeout: 15000
+- assertVisible: "Active"

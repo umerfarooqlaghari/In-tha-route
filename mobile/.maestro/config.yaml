@@ -1,0 +1,3 @@
+# Flows run one by one by run-all.sh (in file order); `maestro test .maestro/flows/<file>` runs one.
+flows:
+  - flows/*

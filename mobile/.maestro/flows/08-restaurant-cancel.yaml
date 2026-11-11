@@ -1,0 +1,43 @@
+# The restaurant cancels an order before it is collected.
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: acceptedOrder
+- evalScript: ${output.ref = output.orderRef}
+- runFlow: ../common/open-app.yaml
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: rest@e2e.test
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: live_orders
+- extendedWaitUntil:
+    visible: ${output.ref}
+    timeout: 20000
+- assertVisible: "Driver assigned"
+- tapOn: "Cancel order"
+- extendedWaitUntil:
+    visible: "Cancel ${output.ref}?"
+    timeout: 5000
+- assertVisible: "Maya will be told not to collect it. You will not be charged."
+- tapOn:
+    text: "Cancel order"
+    rightOf: "Keep order"
+    above: "Driver assigned"
+- extendedWaitUntil:
+    notVisible: ${output.ref}
+    timeout: 40000
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: orderStatus
+      REF: ${output.ref}
+- assertTrue: ${output.status == 'cancelled'}

@@ -1,0 +1,23 @@
+# Opens a screen from the side menu: ${SCREEN} is the screen key (e.g. open_pool).
+appId: host.exp.Exponent
+---
+- tapOn:
+    id: "open-menu"
+- extendedWaitUntil:
+    visible:
+      id: "nav-${SCREEN}"
+    timeout: 5000
+    optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "nav-${SCREEN}"
+    commands:
+      - tapOn:
+          id: "open-menu"
+      - extendedWaitUntil:
+          visible:
+            id: "nav-${SCREEN}"
+          timeout: 10000
+- tapOn:
+    id: "nav-${SCREEN}"

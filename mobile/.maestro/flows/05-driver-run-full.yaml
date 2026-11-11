@@ -1,0 +1,65 @@
+# The admin's max applies: a driver holding the max sees no pool until they deliver one.
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: setMax
+      MAX: "1"
+- runFlow: ../common/open-app.yaml
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: driver1@e2e.test
+- runFlow:
+    when:
+      visible: "Go online"
+    commands:
+      - tapOn: "Go online"
+- runFlow: ../common/allow-location.yaml
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: poolOrder
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: poolOrder
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: open_pool
+- extendedWaitUntil:
+    visible: "Accept"
+    timeout: 30000
+- tapOn:
+    text: "Accept"
+    index: 0
+- extendedWaitUntil:
+    visible: "Your run is full"
+    timeout: 20000
+- assertVisible: "You have 1 of 1 orders. Deliver one to see new orders."
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: live_route
+- tapOn: "Picked up"
+- extendedWaitUntil:
+    visible: "Delivered"
+    timeout: 15000
+- tapOn: "Delivered"
+- extendedWaitUntil:
+    visible: "Batch complete"
+    timeout: 15000
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: open_pool
+- extendedWaitUntil:
+    visible: "Accept"
+    timeout: 30000
+- assertVisible: "0 / 1 orders"

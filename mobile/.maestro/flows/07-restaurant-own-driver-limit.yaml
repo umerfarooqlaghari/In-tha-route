@@ -1,0 +1,45 @@
+# Scan 2 of 2 (Gemini): an in-house driver at the limit is hidden from the list and comes
+# back as soon as they deliver an order.
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: setMax
+      MAX: "1"
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: ownDriverOrder
+- runFlow: ../common/open-app.yaml
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: rest@e2e.test
+- runFlow: ../common/upload-receipt.yaml
+- tapOn: "Continue"
+- extendedWaitUntil:
+    visible: "Who delivers?"
+    timeout: 10000
+- tapOn: "My driver"
+- assertVisible: "All your drivers already have 1 orders. A driver shows here again as soon as they deliver one."
+# The driver row reads as one label ("AK, Ali Khan, Car · 0/1 orders"), hence the wildcards.
+- assertNotVisible: ".*Ali Khan.*"
+# Ali delivers his order: he comes back to the list on the next refresh.
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: ownDriverDeliver
+- extendedWaitUntil:
+    visible: ".*Ali Khan.*"
+    timeout: 40000
+- assertVisible: ".*0/1 orders.*"
+- tapOn: ".*Ali Khan.*"
+- tapOn: "Post order"
+- extendedWaitUntil:
+    visible: "Order is live"
+    timeout: 30000

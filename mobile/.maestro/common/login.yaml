@@ -1,0 +1,59 @@
+# Signs in as ${EMAIL} (password from the e2e seed).
+appId: host.exp.Exponent
+---
+- runFlow: logout.yaml
+# A failed earlier run can leave the app on the login form already.
+- runFlow:
+    when:
+      notVisible:
+        id: "login-email"
+    commands:
+      - extendedWaitUntil:
+          visible: "Welcome"
+          timeout: 15000
+      - tapOn: "Log in"
+- tapOn:
+    id: "login-email"
+- eraseText: 40
+- inputText: ${EMAIL}
+# Typing can drop or keep a stray character on a busy simulator: retype until it matches.
+- repeat:
+    while:
+      notVisible:
+        id: "login-email"
+        text: ${EMAIL}
+    times: 3
+    commands:
+      - tapOn:
+          id: "login-email"
+      - eraseText: 60
+      - inputText: ${EMAIL}
+- tapOn:
+    id: "login-password"
+- eraseText: 30
+- inputText: "E2ePass123"
+- pressKey: Enter
+# iOS may cover the app with a system "Save Password?" sheet that Maestro cannot see;
+# while it is up the app's menu is hidden, so tap its Not Now button by position.
+- extendedWaitUntil:
+    visible:
+      id: "open-menu"
+    timeout: 10000
+    optional: true
+- repeat:
+    while:
+      notVisible:
+        id: "open-menu"
+    times: 4
+    commands:
+      - longPressOn:
+          point: "31%,64%"
+      - extendedWaitUntil:
+          visible:
+            id: "open-menu"
+          timeout: 6000
+          optional: true
+- extendedWaitUntil:
+    visible:
+      id: "open-menu"
+    timeout: 30000

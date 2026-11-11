@@ -1,0 +1,15 @@
+# Signs out if someone is signed in.
+appId: host.exp.Exponent
+---
+- runFlow:
+    when:
+      visible:
+        id: "open-menu"
+    commands:
+      - tapOn:
+          id: "open-menu"
+      - tapOn:
+          id: "logout"
+      - extendedWaitUntil:
+          visible: "Welcome"
+          timeout: 15000

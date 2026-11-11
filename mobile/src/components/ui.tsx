@@ -132,6 +132,10 @@ export function Button({
     <Pressable
       disabled={disabled || loading}
       onPress={onPress}
+      // Without this VoiceOver also reads the icon's private-use glyph before the label.
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!(disabled || loading), busy: !!loading }}
       style={({ pressed }) => [
         styles.button,
         compact && styles.buttonCompact,
@@ -161,15 +165,23 @@ export function IconButton({
   onPress,
   tone = 'neutral',
   size = 40,
+  label,
+  testID,
 }: {
   icon: IconName;
   onPress?: () => void;
   tone?: 'neutral' | 'white';
   size?: number;
+  /** Read out by VoiceOver (icon-only buttons have no visible text). */
+  label?: string;
+  testID?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label ?? icon}
+      testID={testID}
       hitSlop={8}
       style={({ pressed }) => [
         styles.iconButton,
@@ -239,6 +251,9 @@ export function Chip({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: !!selected }}
       style={({ pressed }) => [
         styles.chip,
         selected && styles.chipSelected,
@@ -288,20 +303,36 @@ export function Stepper({
   value,
   onDecrement,
   onIncrement,
+  name,
 }: {
   value: string;
   onDecrement: () => void;
   onIncrement: () => void;
+  /** What is being changed, for VoiceOver and tests (e.g. "Restaurant fee"). */
+  name?: string;
 }) {
+  const id = name?.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return (
     <View style={styles.stepper}>
-      <Pressable onPress={onDecrement} hitSlop={6} style={styles.stepperBtn}>
+      <Pressable
+        onPress={onDecrement}
+        hitSlop={6}
+        style={styles.stepperBtn}
+        accessibilityRole="button"
+        accessibilityLabel={name ? `Decrease ${name}` : 'Decrease'}
+        testID={id ? `${id}-minus` : undefined}>
         <Ionicons name="remove" size={16} color={C.ink} />
       </Pressable>
-      <Text style={styles.stepperValue} numberOfLines={1}>
+      <Text style={styles.stepperValue} numberOfLines={1} testID={id ? `${id}-value` : undefined}>
         {value}
       </Text>
-      <Pressable onPress={onIncrement} hitSlop={6} style={styles.stepperBtn}>
+      <Pressable
+        onPress={onIncrement}
+        hitSlop={6}
+        style={styles.stepperBtn}
+        accessibilityRole="button"
+        accessibilityLabel={name ? `Increase ${name}` : 'Increase'}
+        testID={id ? `${id}-plus` : undefined}>
         <Ionicons name="add" size={16} color={C.ink} />
       </Pressable>
     </View>

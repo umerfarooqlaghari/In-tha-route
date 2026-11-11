@@ -217,9 +217,18 @@ function OrderControls({
       {(withDriver || cancellable) && (
         <View style={styles.controlRow}>
           {withDriver && (
-            <Button label="Move driver" icon="swap-horizontal" compact variant="secondary" onPress={confirmRelease} />
+            <Button
+              label="Move driver"
+              icon="swap-horizontal"
+              compact
+              variant="secondary"
+              style={styles.controlButton}
+              onPress={confirmRelease}
+            />
           )}
-          {cancellable && <Button label="Cancel" icon="close" compact variant="ghost" onPress={confirmCancel} />}
+          {cancellable && (
+            <Button label="Cancel" icon="close" compact variant="ghost" style={styles.controlButton} onPress={confirmCancel} />
+          )}
         </View>
       )}
     </View>
@@ -311,6 +320,7 @@ function PricingScreen() {
             <Text style={styles.muted}>Per order</Text>
           </View>
           <Stepper
+            name="Restaurant fee"
             value={formatGbp(algorithm.baseRestaurantChargeGbp)}
             onDecrement={() => setFee(-0.25)}
             onIncrement={() => setFee(0.25)}
@@ -323,6 +333,7 @@ function PricingScreen() {
             <Text style={styles.muted}>Covered by the fee</Text>
           </View>
           <Stepper
+            name="Included distance"
             value={`${algorithm.baseDistanceMiles} mi`}
             onDecrement={() => nudge('baseDistanceMiles', -0.5, 0.5, 20)}
             onIncrement={() => nudge('baseDistanceMiles', 0.5, 0.5, 20)}
@@ -335,6 +346,7 @@ function PricingScreen() {
             <Text style={styles.muted}>Charged per mile beyond</Text>
           </View>
           <Stepper
+            name="Extra mile restaurant"
             value={formatGbp(algorithm.extraMileRestaurantChargeGbp)}
             onDecrement={() => nudge('extraMileRestaurantChargeGbp', -0.05, 0, 10)}
             onIncrement={() => nudge('extraMileRestaurantChargeGbp', 0.05, 0, 10)}
@@ -347,6 +359,7 @@ function PricingScreen() {
             <Text style={styles.muted}>Paid per mile beyond</Text>
           </View>
           <Stepper
+            name="Extra mile driver"
             value={formatGbp(algorithm.extraMileDriverPayoutGbp)}
             onDecrement={() => nudge('extraMileDriverPayoutGbp', -0.05, 0, 10)}
             onIncrement={() => nudge('extraMileDriverPayoutGbp', 0.05, 0, 10)}
@@ -362,6 +375,7 @@ function PricingScreen() {
             <Text style={styles.muted}>Orders a driver holds at once</Text>
           </View>
           <Stepper
+            name="Max batch"
             value={`${algorithm.maxBatchSize}`}
             onDecrement={() => setMax(-1)}
             onIncrement={() => setMax(1)}
@@ -374,6 +388,7 @@ function PricingScreen() {
             <Text style={styles.muted}>Who sees a new order</Text>
           </View>
           <Stepper
+            name="Driver radius"
             value={`${algorithm.offerRadiusMiles} mi`}
             onDecrement={() => nudge('offerRadiusMiles', -0.5, 0.5, 20)}
             onIncrement={() => nudge('offerRadiusMiles', 0.5, 0.5, 20)}
@@ -397,6 +412,7 @@ function PricingScreen() {
                 </Text>
               </View>
               <Stepper
+                name={`${ORDINALS[i]} order pay`}
                 value={formatGbp(pay)}
                 onDecrement={() => setTier(i, -0.1)}
                 onIncrement={() => setTier(i, 0.1)}
@@ -689,7 +705,8 @@ const styles = StyleSheet.create({
     backgroundColor: C.primarySoft,
   },
   attentionText: { ...Brand.type.caption, color: C.ink, flex: 1 },
-  controlRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  controlRow: { flexDirection: 'row', gap: 8 },
+  controlButton: { flex: 1 },
 
   map: { height: 240 },
   mapFooter: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, padding: 14 },

@@ -1,0 +1,7 @@
+# Runs the test-data helper with ${ACTION}.
+appId: host.exp.Exponent
+---
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: ${ACTION}

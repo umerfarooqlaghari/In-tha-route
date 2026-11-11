@@ -1,0 +1,44 @@
+# Opens the app in Expo Go (Metro on :8082) and waits for the first screen.
+appId: host.exp.Exponent
+---
+- openLink: exp://localhost:8082
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+# A chat left open by an earlier run stays on top after a reload: close it first.
+- extendedWaitUntil:
+    visible:
+      id: "chat-close"
+    timeout: 5000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "chat-close"
+    commands:
+      - tapOn:
+          id: "chat-close"
+          repeat: 2
+          delay: 800
+- extendedWaitUntil:
+    visible:
+      text: "Log in|Welcome|Open menu|Reload"
+    timeout: 60000
+# Expo Go shows its developer menu the first time: close it.
+- runFlow:
+    when:
+      visible: "Toggle performance monitor"
+    commands:
+      - tapOn:
+          point: "90%,49%"
+      - waitForAnimationToEnd
+- runFlow:
+    when:
+      visible: "Toggle performance monitor"
+    commands:
+      - swipe:
+          start: "50%,50%"
+          end: "50%,98%"
+      - waitForAnimationToEnd

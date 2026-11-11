@@ -55,6 +55,7 @@ function LoginForm({ onBack }: { onBack: () => void }) {
       <View style={styles.form}>
         <Field
           label="Email"
+          testID="login-email"
           value={email}
           onChangeText={setEmail}
           error={errors.email}
@@ -66,6 +67,7 @@ function LoginForm({ onBack }: { onBack: () => void }) {
         />
         <Field
           label="Password"
+          testID="login-password"
           value={password}
           onChangeText={setPassword}
           error={errors.password}

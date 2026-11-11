@@ -253,7 +253,7 @@ function ChatThread({ id, onClose }: { id: string; onClose: () => void }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {/* Header */}
       <View style={[styles.threadHeader, { paddingTop: Math.max(insets.top, 20) + 8 }]}>
-        <IconButton icon="chevron-back" onPress={onClose} />
+        <IconButton icon="chevron-back" label="Close chat" testID="chat-close" onPress={onClose} />
         <View>
           <Avatar name={counterpart.name} tone={counterpart.role === 'driver' ? 'info' : 'primary'} size={40} />
           <View style={styles.avatarDot}>
@@ -268,7 +268,7 @@ function ChatThread({ id, onClose }: { id: string; onClose: () => void }) {
             {presenceLabel(counterpart, now)}
           </Text>
         </View>
-        <IconButton icon="call-outline" onPress={() => showPhone(counterpart.name, counterpart.phone, dial)} />
+        <IconButton icon="call-outline" label="Call" onPress={() => showPhone(counterpart.name, counterpart.phone, dial)} />
       </View>
 
       {conversation.activeOrders.length > 0 && (
@@ -322,12 +322,18 @@ function ChatThread({ id, onClose }: { id: string; onClose: () => void }) {
             onChangeText={setDraft}
             placeholder="Message"
             placeholderTextColor={C.ink3}
+            testID="chat-input"
+            accessibilityLabel="Message"
             multiline
             maxLength={2000}
           />
           <Pressable
             onPress={submit}
             disabled={!draft.trim()}
+            accessibilityRole="button"
+            accessibilityLabel="Send"
+            accessibilityState={{ disabled: !draft.trim() }}
+            testID="chat-send"
             style={({ pressed }) => [
               styles.sendButton,
               !draft.trim() && styles.sendDisabled,

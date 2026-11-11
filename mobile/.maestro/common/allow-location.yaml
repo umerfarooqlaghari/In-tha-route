@@ -1,0 +1,18 @@
+# Answers the location prompts if they appear (system dialog, then the app's "Always" note).
+appId: host.exp.Exponent
+---
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"
+- runFlow:
+    when:
+      visible: "Keep sharing your location"
+    commands:
+      - tapOn: "Not now"
+- runFlow:
+    when:
+      visible: "Allow While Using App"
+    commands:
+      - tapOn: "Allow While Using App"

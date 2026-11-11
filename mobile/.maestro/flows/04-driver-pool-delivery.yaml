@@ -1,0 +1,61 @@
+# A platform driver goes online, sees a nearby order in the pool, accepts it first,
+# collects and delivers it.
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
+- runFlow: ../common/open-app.yaml
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: driver1@e2e.test
+- runFlow:
+    when:
+      visible: "Go online"
+    commands:
+      - tapOn: "Go online"
+- runFlow: ../common/allow-location.yaml
+- extendedWaitUntil:
+    visible: "Online"
+    timeout: 15000
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: poolOrder
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: open_pool
+- extendedWaitUntil:
+    visible: "Saffron Kitchen"
+    timeout: 30000
+- assertVisible: "0 / 5 orders"
+- assertVisible: "First driver to accept an order gets it."
+- tapOn: "Accept"
+- extendedWaitUntil:
+    visible: "Order accepted. Head to the restaurant."
+    timeout: 15000
+- assertVisible: "1 / 5 orders"
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: live_route
+- extendedWaitUntil:
+    visible: "Picked up"
+    timeout: 15000
+- assertVisible: "Stop 1 of 2"
+- tapOn: "Picked up"
+- extendedWaitUntil:
+    visible: "Delivered"
+    timeout: 15000
+- assertVisible: "Stop 2 of 2"
+- tapOn: "Delivered"
+- extendedWaitUntil:
+    visible: "Batch complete"
+    timeout: 15000
+- tapOn: "Find new orders"
+- extendedWaitUntil:
+    visible: "Finding orders"
+    timeout: 15000

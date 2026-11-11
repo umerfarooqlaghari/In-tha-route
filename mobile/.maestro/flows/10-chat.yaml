@@ -1,0 +1,88 @@
+# Restaurant and driver message each other about an accepted order.
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: acceptedOrder
+- evalScript: ${output.ref = output.orderRef}
+- runFlow: ../common/open-app.yaml
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: rest@e2e.test
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: live_orders
+- extendedWaitUntil:
+    visible: ${output.ref}
+    timeout: 20000
+- tapOn: "Chat"
+- extendedWaitUntil:
+    visible:
+      id: "chat-input"
+    timeout: 15000
+- tapOn:
+    id: "chat-input"
+- inputText: "Please use the side door"
+# Typing is slow on a busy simulator: send only once the whole text is in the box.
+- extendedWaitUntil:
+    visible:
+      id: "chat-input"
+      text: "Please use the side door"
+    timeout: 90000
+- tapOn:
+    id: "chat-send"
+# Sent: the box empties and the bubble shows.
+- extendedWaitUntil:
+    notVisible:
+      id: "chat-input"
+      text: "Please use the side door"
+    timeout: 60000
+- assertVisible: "Please use the side door"
+- tapOn:
+    id: "chat-close"
+    repeat: 2
+    delay: 800
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: driver2@e2e.test
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: messages
+- extendedWaitUntil:
+    visible: ".*Saffron Kitchen.*"
+    timeout: 90000
+- tapOn: ".*Saffron Kitchen.*"
+- extendedWaitUntil:
+    visible: "Please use the side door"
+    timeout: 15000
+- tapOn:
+    id: "chat-input"
+- inputText: "On my way"
+# Typing is slow on a busy simulator: send only once the whole text is in the box.
+- extendedWaitUntil:
+    visible:
+      id: "chat-input"
+      text: "On my way"
+    timeout: 90000
+- tapOn:
+    id: "chat-send"
+# Sent: the box empties and the bubble shows.
+- extendedWaitUntil:
+    notVisible:
+      id: "chat-input"
+      text: "On my way"
+    timeout: 60000
+- assertVisible: "On my way"
+- tapOn:
+    id: "chat-close"
+    repeat: 2
+    delay: 800

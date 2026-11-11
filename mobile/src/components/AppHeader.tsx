@@ -35,7 +35,7 @@ export function AppHeader() {
     <>
         <View style={[styles.header, { paddingTop: topPad }]}>
           <View>
-            <IconButton icon="menu" onPress={() => setDrawerOpen(true)} />
+            <IconButton icon="menu" label="Open menu" testID="open-menu" onPress={() => setDrawerOpen(true)} />
             {unreadTotal > 0 && <View style={styles.menuDot} pointerEvents="none" />}
           </View>
           <View style={styles.titleWrap}>
@@ -136,6 +136,7 @@ export function AppHeader() {
               return (
                 <Pressable
                   key={s.key}
+                  testID={`nav-${s.key}`}
                   onPress={() => go(s.key)}
                   style={({ pressed }) => [
                     styles.navItem,
@@ -170,6 +171,7 @@ export function AppHeader() {
           <View style={styles.spacer} />
 
           <Pressable
+            testID="logout"
             onPress={() => {
               onClose();
               logout();
