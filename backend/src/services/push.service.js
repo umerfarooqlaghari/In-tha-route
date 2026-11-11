@@ -181,7 +181,85 @@ async function driverReviewed(driverId, approved) {
     : { title: 'Documents need attention', body: 'Some of your documents were not accepted. Open the app to upload them again.', data: { type: 'account' } });
 }
 
+const adminUserIds = async () =>
+  (await db.query(`SELECT id FROM users WHERE role = 'admin' AND is_active`)).rows.map((r) => r.id);
+
+/** An order was taken off a driver's run (cancelled, or moved to another driver by an admin). */
+async function orderRemovedFromRun(order, kind) {
+  if (!order || !order.assigned_driver_id) return 0;
+  const { rows } = await db.query('SELECT user_id FROM driver_profiles WHERE id = $1', [order.assigned_driver_id]);
+  if (!rows[0]) return 0;
+  const data = { type: 'order', orderId: order.id };
+  const text = {
+    cancelled: ['Order cancelled', `${ref(order)} was cancelled. Do not collect it.`],
+    cancelled_collected: [
+      'Order cancelled',
+      `${ref(order)} was cancelled by In Tha Route. Do not deliver it; message the restaurant about the food.`,
+    ],
+    released: ['Order moved', `${ref(order)} was given to another driver. Do not collect it.`],
+  }[kind];
+  if (!text) return 0;
+  return sendToUsers([rows[0].user_id], { title: text[0], body: text[1], data });
+}
+
+/** An admin cancelled a restaurant's order. */
+async function orderCancelledByAdmin(order) {
+  const { rows } = await db.query('SELECT owner_user_id FROM restaurants WHERE id = $1', [order.restaurant_id]);
+  if (!rows[0]) return 0;
+  return sendToUsers([rows[0].owner_user_id], {
+    title: 'Order cancelled',
+    body: `In Tha Route cancelled ${ref(order)}${order.postcode ? ` to ${order.postcode}` : ''}.`,
+    data: { type: 'order', orderId: order.id },
+  });
+}
+
+/** An order needs attention: nobody has taken it, or the delivery is running very late. */
+async function attentionAlert(orderId, kind) {
+  const { rows } = await db.query(
+    `SELECT o.id, o.external_order_id, o.postcode, r.name AS restaurant, r.owner_user_id, u.full_name AS driver
+       FROM orders o JOIN restaurants r ON r.id = o.restaurant_id
+       LEFT JOIN driver_profiles d ON d.id = o.assigned_driver_id
+       LEFT JOIN users u ON u.id = d.user_id
+      WHERE o.id = $1`,
+    [orderId]
+  );
+  const o = rows[0];
+  if (!o) return 0;
+  const data = { type: 'order', orderId: o.id };
+  const admins = await adminUserIds();
+  if (kind === 'no_driver') {
+    return (
+      (await sendToUsers([o.owner_user_id], {
+        title: 'Still looking for a driver',
+        body: `${ref(o)} is ready but no driver has taken it yet. We are still trying.`,
+        data,
+      })) +
+      (await sendToUsers(admins, {
+        title: 'No driver for an order',
+        body: `${o.restaurant}: ${ref(o)} to ${o.postcode} has no driver yet.`,
+        data,
+      }))
+    );
+  }
+  const driver = o.driver ? o.driver.split(' ')[0] : 'The driver';
+  return (
+    (await sendToUsers([o.owner_user_id], {
+      title: 'Delivery running late',
+      body: `${driver} collected ${ref(o)} a while ago and has not marked it delivered. Message them to check.`,
+      data,
+    })) +
+    (await sendToUsers(admins, {
+      title: 'Delivery running late',
+      body: `${o.restaurant}: ${ref(o)} to ${o.postcode} collected by ${driver}, not delivered yet.`,
+      data,
+    }))
+  );
+}
+
 module.exports = {
+  orderRemovedFromRun,
+  orderCancelledByAdmin,
+  attentionAlert,
   isValidToken,
   register,
   unregister,

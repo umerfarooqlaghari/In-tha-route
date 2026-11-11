@@ -15,6 +15,7 @@ router.get('/dashboard', h(c.dashboard)); // orders, in-house drivers, policy, f
 router.post('/receipts/scan', scanLimiter, h(c.scanReceipt)); // photo -> draft order (OCR)
 router.post('/orders', h(c.createOrder)); // post an order
 router.post('/orders/:id/ready', h(c.markOrderReady)); // "Mark ready"
+router.post('/orders/:id/cancel', h(c.cancelOrder)); // before the driver collects it
 router.post('/drivers', h(c.addDriver)); // add an in-house driver
 router.patch('/policy', h(c.updatePolicy)); // delivery settings
 

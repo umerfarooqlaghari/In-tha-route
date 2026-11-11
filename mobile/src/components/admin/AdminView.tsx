@@ -22,7 +22,7 @@ import {
 import { API_URL } from '@/constants/api';
 import { Brand, formatGbp, sourceColor } from '@/constants/brand';
 import { coordsForPostcode } from '@/constants/geo';
-import { DriverPolicy, DriverProfile, KycDocument, useInThaRoute } from '@/context/InThaRouteContext';
+import { DriverPolicy, DriverProfile, KycDocument, LiveOrder, useInThaRoute } from '@/context/InThaRouteContext';
 import { getAccessToken } from '@/services/apiClient';
 
 const C = Brand.colors;
@@ -54,10 +54,10 @@ export function AdminView() {
 /* ========================================================================== */
 
 function OverviewScreen() {
-  const { orders, restaurants, totals, drivers } = useInThaRoute();
+  const { orders, restaurants, totals, drivers, cancelOrder, releaseOrder } = useInThaRoute();
   // Online drivers whose app has sent a recent GPS position.
   const liveDrivers = drivers.filter((d) => d.isOnline && d.location);
-  const active = orders.filter((o) => o.status !== 'delivered');
+  const active = orders.filter((o) => o.status !== 'delivered' && o.status !== 'cancelled');
   // Today's live and delivered orders, totalled by the server.
   const billed = totals?.billedGbp ?? 0;
   const paid = totals?.driverPayGbp ?? 0;
@@ -146,12 +146,83 @@ function OverviewScreen() {
                     <Text style={styles.profit}>+{formatGbp(margin)}</Text>
                   )}
                 </View>
+                <OrderControls order={o} onCancel={cancelOrder} onRelease={releaseOrder} />
               </View>
             );
           })
         )}
       </Card>
     </Screen>
+  );
+}
+
+const ADMIN_STATUS: Record<LiveOrder['status'], string> = {
+  preparing: 'Waiting for a driver',
+  ready_for_pickup: 'Ready · waiting for a driver',
+  batched_offered: 'Offered',
+  driver_assigned: 'Driver on the way',
+  picked_up: 'Collected',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+};
+
+/** Status, any alert, and what the admin can do about an order. */
+function OrderControls({
+  order: o,
+  onCancel,
+  onRelease,
+}: {
+  order: LiveOrder;
+  onCancel: (id: string) => Promise<boolean>;
+  onRelease: (id: string) => Promise<boolean>;
+}) {
+  const withDriver = !!o.batchId && (o.status === 'batched_offered' || o.status === 'driver_assigned');
+  // The admin can cancel until delivery, even after the driver has collected the food.
+  const cancellable = o.status !== 'delivered' && o.status !== 'cancelled';
+  const collected = o.status === 'picked_up';
+  const driver = o.assignedDriverName?.split(' ')[0];
+  const ref = o.externalOrderId || 'this order';
+
+  const confirmRelease = () =>
+    Alert.alert(`Move ${ref} to another driver?`, `${driver ?? 'The driver'} will be told not to collect it, and it is offered to other drivers.`, [
+      { text: 'Keep', style: 'cancel' },
+      { text: 'Move', onPress: () => void onRelease(o.id) },
+    ]);
+  const confirmCancel = () =>
+    Alert.alert(
+      `Cancel ${ref}?`,
+      collected
+        ? `${driver ?? 'The driver'} already has the food and will be told not to deliver it. The fee and driver pay for this trip stay.`
+        : 'The restaurant and driver are told. The restaurant is not charged.',
+      [
+      { text: 'Keep order', style: 'cancel' },
+        { text: 'Cancel order', style: 'destructive', onPress: () => void onCancel(o.id) },
+      ]
+    );
+
+  return (
+    <View style={styles.gap8}>
+      <Text style={styles.muted} numberOfLines={1}>
+        {ADMIN_STATUS[o.status]}
+        {driver && o.status !== 'preparing' && o.status !== 'ready_for_pickup' ? ` · ${driver}` : ''}
+      </Text>
+      {o.attention && (
+        <View style={styles.attention}>
+          <Ionicons name="alert-circle" size={16} color={C.primary} />
+          <Text style={styles.attentionText}>
+            {o.attention === 'no_driver' ? 'No driver has taken this yet.' : 'Collected but not delivered for a long time.'}
+          </Text>
+        </View>
+      )}
+      {(withDriver || cancellable) && (
+        <View style={styles.controlRow}>
+          {withDriver && (
+            <Button label="Move driver" icon="swap-horizontal" compact variant="secondary" onPress={confirmRelease} />
+          )}
+          {cancellable && <Button label="Cancel" icon="close" compact variant="ghost" onPress={confirmCancel} />}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -546,6 +617,7 @@ const styles = StyleSheet.create({
   photoWrap: { alignItems: 'center', justifyContent: 'center', gap: 10, minHeight: 200 },
   photo: { width: '100%', height: 360, borderRadius: Brand.radius.md, backgroundColor: C.surfaceAlt },
   gap10: { gap: 10 },
+  gap8: { gap: 8 },
   gap12: { gap: 12 },
   noPad: { padding: 0, gap: 0, overflow: 'hidden' },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
@@ -554,6 +626,16 @@ const styles = StyleSheet.create({
   cardBody: { ...Brand.type.body, color: C.ink2 },
   muted: { ...Brand.type.caption, color: C.ink3, flexShrink: 1 },
   mutedStrong: { ...Brand.type.captionStrong, color: C.ink2 },
+  attention: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: C.primarySoft,
+  },
+  attentionText: { ...Brand.type.caption, color: C.ink, flex: 1 },
+  controlRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
 
   map: { height: 240 },
   mapFooter: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, padding: 14 },

@@ -107,6 +107,14 @@ async function markOrderReady(req, res) {
   res.json({ dashboard: await buildDashboard(req.user) });
 }
 
+/** "Cancel order": allowed until the driver has collected it. */
+async function cancelOrder(req, res) {
+  const orderId = parse(v.uuidSchema, req.params.id);
+  const { reason } = parse(v.cancelSchema, req.body || {});
+  await orders.cancelForRestaurant(req.user, orderId, reason);
+  res.json({ dashboard: await buildDashboard(req.user) });
+}
+
 async function addDriver(req, res) {
   const data = parse(v.addOwnDriverSchema, req.body);
   await drivers.createOwnDriver(req.user.restaurant_id, data);
@@ -119,4 +127,4 @@ async function updatePolicy(req, res) {
   res.json({ dashboard: await buildDashboard(req.user) });
 }
 
-module.exports = { dashboard, scanReceipt, createOrder, markOrderReady, addDriver, updatePolicy };
+module.exports = { dashboard, scanReceipt, createOrder, markOrderReady, cancelOrder, addDriver, updatePolicy };

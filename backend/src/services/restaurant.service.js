@@ -5,7 +5,7 @@ const geo = require('./geo.service');
 const WITH_COUNTS = `
   SELECT r.*,
          (SELECT count(*) FROM orders o
-           WHERE o.restaurant_id = r.id AND o.status <> 'delivered')::int AS active_orders,
+           WHERE o.restaurant_id = r.id AND o.status NOT IN ('delivered', 'cancelled'))::int AS active_orders,
          (SELECT count(*) FROM orders o
            WHERE o.restaurant_id = r.id AND o.status = 'delivered'
              AND (o.delivered_at AT TIME ZONE 'Europe/London')::date

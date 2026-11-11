@@ -107,7 +107,7 @@ async function updateConfig(partial, userId) {
 
     const live = await client.query(
       `SELECT id, distance_miles, batch_position FROM orders
-        WHERE status <> 'delivered' AND dispatch_type = 'open_platform' FOR UPDATE`
+        WHERE status NOT IN ('delivered', 'cancelled') AND dispatch_type = 'open_platform' FOR UPDATE`
     );
     for (const o of live.rows) {
       const fin = calculateOrderFinancials(next, Number(o.distance_miles), o.batch_position, 'open_platform');

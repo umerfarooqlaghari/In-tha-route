@@ -100,6 +100,7 @@ const historySchema = z.object({
 });
 
 const rejectSchema = z.object({ reason: z.string().trim().max(300).optional() });
+const cancelSchema = z.object({ reason: z.string().trim().max(300).default('') });
 const uuidSchema = z.uuid('Invalid id.');
 
 module.exports = {
@@ -112,5 +113,6 @@ module.exports = {
   locationSchema,
   historySchema,
   rejectSchema,
+  cancelSchema,
   uuidSchema,
 };

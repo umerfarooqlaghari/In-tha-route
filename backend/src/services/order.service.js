@@ -18,6 +18,30 @@ const ORDER_SELECT = `
     LEFT JOIN users u ON u.id = d.user_id
 `;
 
+// Nobody has taken an open order this long after it was ready: tell the restaurant and admins.
+const NO_DRIVER_ALERT_MINUTES =
+  Number(process.env.NO_DRIVER_ALERT_MINUTES) > 0 ? Number(process.env.NO_DRIVER_ALERT_MINUTES) : 5;
+// A collected order still not delivered this long after pickup.
+const LATE_DELIVERY_MINUTES =
+  Number(process.env.LATE_DELIVERY_MINUTES) > 0 ? Number(process.env.LATE_DELIVERY_MINUTES) : 45;
+// The same order number from the same app within this window is treated as a repeat.
+const DUPLICATE_WINDOW_HOURS = 24;
+
+/** Why an order needs someone to look at it, if it does. */
+function attentionOf(row, now = new Date()) {
+  if (
+    row.dispatch_type === 'open_platform' && !row.batch_id &&
+    (row.status === 'preparing' || row.status === 'ready_for_pickup') &&
+    now - new Date(row.ready_at) > NO_DRIVER_ALERT_MINUTES * 60000
+  ) {
+    return 'no_driver';
+  }
+  if (row.status === 'picked_up' && row.picked_up_at && now - new Date(row.picked_up_at) > LATE_DELIVERY_MINUTES * 60000) {
+    return 'late_delivery';
+  }
+  return undefined;
+}
+
 const coordsOf = (lat, lng) => (lat != null && lng != null ? { latitude: lat, longitude: lng } : null);
 
 /**
@@ -68,6 +92,7 @@ function toLiveOrder(row, { view, now = new Date(), maskDelivered = false, nextP
     driverPayoutGbp: view === 'restaurant' ? 0 : payout,
     platformMarginGbp: view === 'admin' ? pricing.round2(fee - payout) : 0,
     nextPayoutGbp,
+    attention: view === 'restaurant' || view === 'admin' ? attentionOf(row, now) : undefined,
     createdAtLabel: timeAgo(row.created_at, now),
     pickupCoords: coordsOf(row.pickup_latitude, row.pickup_longitude),
     dropoffCoords: coordsOf(row.dropoff_latitude, row.dropoff_longitude),
@@ -77,7 +102,7 @@ function toLiveOrder(row, { view, now = new Date(), maskDelivered = false, nextP
 
 async function listLiveForRestaurant(restaurantId) {
   const { rows } = await db.query(
-    `${ORDER_SELECT} WHERE o.restaurant_id = $1 AND o.status <> 'delivered' ORDER BY o.ready_at ASC`,
+    `${ORDER_SELECT} WHERE o.restaurant_id = $1 AND o.status NOT IN ('delivered', 'cancelled') ORDER BY o.ready_at ASC`,
     [restaurantId]
   );
   return rows.map((r) => toLiveOrder(r, { view: 'restaurant' }));
@@ -87,8 +112,9 @@ async function listLiveForRestaurant(restaurantId) {
 async function listForAdmin() {
   const { rows } = await db.query(
     `${ORDER_SELECT}
-      WHERE o.status <> 'delivered'
-         OR (o.delivered_at AT TIME ZONE 'Europe/London')::date = (now() AT TIME ZONE 'Europe/London')::date
+      WHERE o.status NOT IN ('delivered', 'cancelled')
+         OR (coalesce(o.delivered_at, o.cancelled_at) AT TIME ZONE 'Europe/London')::date
+            = (now() AT TIME ZONE 'Europe/London')::date
       ORDER BY o.created_at DESC`
   );
   return rows.map((r) => toLiveOrder(r, { view: 'admin' }));
@@ -143,15 +169,36 @@ async function locateDropoff(restaurantRow, address, postcode, config) {
   return { coords: hit, distanceMiles: miles, estimated: false };
 }
 
+/** Stops the same receipt being posted twice (a double tap, or two staff scanning it). */
+async function rejectDuplicate(client, restaurantId, input) {
+  const ref = String(input.externalOrderId || '').trim();
+  if (!ref) return;
+  const { rows } = await client.query(
+    `SELECT created_at FROM orders
+      WHERE restaurant_id = $1 AND source = $2 AND external_order_id = $3 AND status <> 'cancelled'
+        AND created_at > now() - make_interval(hours => $4)
+      ORDER BY created_at DESC LIMIT 1`,
+    [restaurantId, input.source, ref, DUPLICATE_WINDOW_HOURS]
+  );
+  if (rows[0]) {
+    throw new AppError(
+      409,
+      'DUPLICATE_ORDER',
+      `${input.source} order ${ref} was already posted ${timeAgo(rows[0].created_at).toLowerCase()}. Cancel that one first if you need to post it again.`
+    );
+  }
+}
+
 /** A restaurant posts an order (normally from a scanned receipt). */
 async function createOrder(user, input) {
   const config = await pricing.getConfig();
   const restaurant = await restaurants.ensureCoords(await restaurants.getWithCounts(user.restaurant_id));
+  await rejectDuplicate(db, restaurant.id, input); // fail fast, before the address lookups
 
   if (input.dispatchType === 'own_driver') {
     const { rows } = await db.query(
-      `SELECT 1 FROM driver_profiles
-        WHERE id = $1 AND employer_restaurant_id = $2 AND driver_type = 'restaurant_own'`,
+      `SELECT 1 FROM driver_profiles d JOIN users u ON u.id = d.user_id
+        WHERE d.id = $1 AND d.employer_restaurant_id = $2 AND d.driver_type = 'restaurant_own' AND u.is_active`,
       [input.ownDriverId, restaurant.id]
     );
     if (!rows[0]) {
@@ -165,6 +212,13 @@ async function createOrder(user, input) {
   const fin = pricing.calculateOrderFinancials(config, dropoff.distanceMiles, 1, input.dispatchType);
 
   const orderId = await db.withTransaction(async (client) => {
+    // One post at a time per order number, so two taps at once cannot both get through.
+    if (input.externalOrderId) {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `order-ref|${restaurant.id}|${input.source}|${input.externalOrderId}`,
+      ]);
+      await rejectDuplicate(client, restaurant.id, input);
+    }
     const { rows } = await client.query(
       `INSERT INTO orders (
          restaurant_id, source, external_order_id, customer_name, customer_phone, phone_access_code,
@@ -219,13 +273,71 @@ async function markReady(restaurantId, orderId) {
     `UPDATE orders
         SET ready_at = least(ready_at, now()),
             status = CASE WHEN status = 'preparing' THEN 'ready_for_pickup' ELSE status END
-      WHERE id = $1 AND restaurant_id = $2 AND status <> 'delivered'`,
+      WHERE id = $1 AND restaurant_id = $2 AND status NOT IN ('delivered', 'cancelled')`,
     [orderId, restaurantId]
   );
   if (rowCount === 0) throw new AppError(404, 'ORDER_NOT_FOUND', 'Order not found.');
 }
 
+/** The restaurant cancels one of its orders (before the driver has collected it). */
+async function cancelForRestaurant(user, orderId, reason) {
+  const { order } = await dispatch.cancelOrder(orderId, { userId: user.id, restaurantId: user.restaurant_id, reason });
+  push.later(async () => {
+    await push.orderRemovedFromRun(order, 'cancelled');
+    if (order.dispatch_type === 'open_platform' && order.batch_id) await dispatch.offerOpenOrders();
+  });
+}
+
+/** Admin cancels any order that is not delivered yet, collected or not. */
+async function cancelForAdmin(user, orderId, reason) {
+  const { order } = await dispatch.cancelOrder(orderId, { userId: user.id, reason, allowCollected: true });
+  push.later(async () => {
+    await push.orderRemovedFromRun(order, order.status === 'picked_up' ? 'cancelled_collected' : 'cancelled');
+    await push.orderCancelledByAdmin(order);
+  });
+}
+
+/** Admin takes an order off its driver and puts it back in the pool for someone else. */
+async function releaseForAdmin(orderId) {
+  const { order } = await dispatch.releaseToPool(orderId);
+  push.later(async () => {
+    await push.orderRemovedFromRun(order, 'released');
+    await dispatch.offerOpenOrders();
+  });
+}
+
+/**
+ * Tells restaurants and admins (once per order) about orders nobody has taken and
+ * deliveries running very late. Run every ~30 s by the server.
+ */
+async function sendAttentionAlerts() {
+  const noDriver = await db.query(
+    `UPDATE orders SET no_driver_alert_at = now()
+      WHERE dispatch_type = 'open_platform' AND batch_id IS NULL
+        AND status IN ('preparing', 'ready_for_pickup') AND no_driver_alert_at IS NULL
+        AND ready_at < now() - make_interval(mins => $1)
+      RETURNING id`,
+    [NO_DRIVER_ALERT_MINUTES]
+  );
+  const late = await db.query(
+    `UPDATE orders SET late_alert_at = now()
+      WHERE status = 'picked_up' AND late_alert_at IS NULL
+        AND picked_up_at < now() - make_interval(mins => $1)
+      RETURNING id`,
+    [LATE_DELIVERY_MINUTES]
+  );
+  for (const { id } of noDriver.rows) await push.attentionAlert(id, 'no_driver');
+  for (const { id } of late.rows) await push.attentionAlert(id, 'late_delivery');
+  return { noDriver: noDriver.rowCount, late: late.rowCount };
+}
+
 module.exports = {
+  NO_DRIVER_ALERT_MINUTES,
+  LATE_DELIVERY_MINUTES,
+  cancelForRestaurant,
+  cancelForAdmin,
+  releaseForAdmin,
+  sendAttentionAlerts,
   toLiveOrder,
   listLiveForRestaurant,
   listForAdmin,

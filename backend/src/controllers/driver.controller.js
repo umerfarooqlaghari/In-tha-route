@@ -124,6 +124,10 @@ async function dashboard(req, res) {
 async function setAvailability(req, res) {
   const { online } = parse(v.availabilitySchema, req.body);
   await drivers.setOnline(req.user.driver_id, online);
+  // Going offline hands an unanswered offer to the next driver straight away.
+  if (!online && (await dispatch.releaseOffer(req.user.driver_id))) {
+    push.later(() => dispatch.offerOpenOrders());
+  }
   res.json({ dashboard: await buildDashboard(req.user) });
 }
 
@@ -168,7 +172,8 @@ async function nextBatch(req, res) {
 
 async function addPoolOrder(req, res) {
   const orderId = parse(v.uuidSchema, req.params.id);
-  const result = await dispatch.appendPoolOrder(req.user.driver_id, orderId);
+  const { orderId: added, accepted, ...result } = await dispatch.appendPoolOrder(req.user.driver_id, orderId);
+  if (added && accepted) push.later(() => push.orderUpdate([added], 'accepted'));
   res.json({ ...result, dashboard: await buildDashboard(req.user, { offer: false }) });
 }
 

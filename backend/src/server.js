@@ -40,13 +40,19 @@ async function start() {
   // Live chat and online status share the same port.
   realtime.attach(server);
 
-  // Unanswered offers go to the next driver.
+  // Unanswered offers go to the next driver; late or unassigned orders raise an alert.
   const dispatch = require('./services/dispatch.service');
+  const orders = require('./services/order.service');
   setInterval(async () => {
     try {
       if ((await dispatch.expireStaleOffers()) > 0) await dispatch.offerOpenOrders();
     } catch (err) {
       console.error('Offer sweep failed:', err.message);
+    }
+    try {
+      await orders.sendAttentionAlerts();
+    } catch (err) {
+      console.error('Order alerts failed:', err.message);
     }
   }, 30_000).unref();
 }

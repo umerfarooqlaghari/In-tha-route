@@ -194,6 +194,27 @@ async function expireStaleOffers() {
   return expired;
 }
 
+// An order going back to the pool keeps "ready" if the kitchen already said so.
+const BACK_TO_POOL_STATUS = `CASE WHEN ready_at <= now() THEN 'ready_for_pickup' ELSE 'preparing' END`;
+
+const rememberDecline = (client, driverId, orderId) =>
+  client.query(
+    `INSERT INTO batch_declines (driver_id, order_id) VALUES ($1, $2)
+     ON CONFLICT (driver_id, order_id) DO UPDATE SET created_at = now()`,
+    [driverId, orderId]
+  );
+
+/** The driver went offline: an offer they have not accepted goes to someone else straight away. */
+async function releaseOffer(driverId) {
+  try {
+    await decline(driverId, { remember: false });
+    return true;
+  } catch (err) {
+    if (err.code === 'NO_OFFER') return false;
+    throw err;
+  }
+}
+
 /** @returns {Promise<string[]>} the accepted orders' ids */
 async function accept(driverId) {
   return db.withTransaction(async (client) => {
@@ -216,8 +237,12 @@ async function accept(driverId) {
   });
 }
 
-/** Declining releases every order back to the pool at single-order prices. */
-async function decline(driverId) {
+/**
+ * Declining releases every order back to the pool at single-order prices.
+ * `remember: false` (the driver went offline) releases them without blocking the driver
+ * from being offered them again later.
+ */
+async function decline(driverId, { remember = true } = {}) {
   return db.withTransaction(async (client) => {
     const batch = await openBatch(client, driverId, { lock: true });
     if (!batch || batch.status !== 'offered') {
@@ -232,15 +257,11 @@ async function decline(driverId) {
       const fin = pricing.calculateOrderFinancials(config, Number(o.distance_miles), 1, o.dispatch_type);
       await client.query(
         `UPDATE orders SET batch_id = NULL, batch_position = 1, assigned_driver_id = NULL,
-                status = 'preparing', restaurant_fee_gbp = $1, driver_payout_gbp = $2
+                status = ${BACK_TO_POOL_STATUS}, restaurant_fee_gbp = $1, driver_payout_gbp = $2
           WHERE id = $3`,
         [fin.restaurantFeeGbp, fin.driverPayoutGbp, o.id]
       );
-      await client.query(
-        `INSERT INTO batch_declines (driver_id, order_id) VALUES ($1, $2)
-         ON CONFLICT (driver_id, order_id) DO UPDATE SET created_at = now()`,
-        [driverId, o.id]
-      );
+      if (remember) await rememberDecline(client, driverId, o.id);
     }
     await client.query(`UPDATE batches SET status = 'declined' WHERE id = $1`, [batch.id]);
   });
@@ -318,17 +339,23 @@ async function appendPoolOrder(driverId, orderId) {
       `SELECT id, distance_miles FROM orders
         WHERE id = $1 AND batch_id IS NULL AND dispatch_type = 'open_platform'
           AND status IN ('preparing', 'ready_for_pickup')
-        FOR UPDATE SKIP LOCKED`,
+        FOR UPDATE`,
       [orderId]
     );
+    // If another driver (or an offer being built) holds the order, this waits for them to
+    // finish and then checks again: the first to commit gets it, the other is told it's taken.
     const order = rows[0];
     if (!order) return { ok: false, message: 'That order has just been taken.' };
 
     let batch = await openBatch(client, driverId, { lock: true });
     if (!batch) {
+      // The driver picked this order themselves, so there is no offer to accept.
       await acknowledgeCompleted(driverId, client);
       batch = (
-        await client.query(`INSERT INTO batches (driver_id, status) VALUES ($1, 'offered') RETURNING *`, [driverId])
+        await client.query(
+          `INSERT INTO batches (driver_id, status, accepted_at) VALUES ($1, 'accepted', now()) RETURNING *`,
+          [driverId]
+        )
       ).rows[0];
     }
 
@@ -357,7 +384,12 @@ async function appendPoolOrder(driverId, orderId) {
         order.id,
       ]
     );
-    return { ok: true, message: `Added as Order #${position} in your active batch.` };
+    return {
+      ok: true,
+      message: `Added as Order #${position} in your active batch.`,
+      orderId: order.id,
+      accepted: batch.status === 'accepted',
+    };
   });
 }
 
@@ -397,7 +429,134 @@ async function assignToOwnDriver(client, orderId, driverId) {
   );
 }
 
+/**
+ * Takes an order out of its driver's run: the orders left behind move up a place and are
+ * re-priced for their new position. A run left empty is closed.
+ * `allowCollected` (admin only) also takes out an order the driver has already picked up.
+ * Locks the run first, then its orders (the same order as accept / decline / advance).
+ * @returns {Promise<{order: object, driverUserId: string|null}>} the order row as it was, locked
+ */
+async function detachFromBatch(client, orderId, { restaurantId, allowCollected = false } = {}) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const peek = await client.query('SELECT batch_id FROM orders WHERE id = $1', [orderId]);
+    if (!peek.rows[0]) break;
+    const batchId = peek.rows[0].batch_id;
+    const batch = batchId
+      ? (await client.query('SELECT * FROM batches WHERE id = $1 FOR UPDATE', [batchId])).rows[0]
+      : null;
+    const { rows } = await client.query(
+      `SELECT o.*, d.user_id AS driver_user_id FROM orders o
+         LEFT JOIN driver_profiles d ON d.id = o.assigned_driver_id
+        WHERE o.id = $1 FOR UPDATE OF o`,
+      [orderId]
+    );
+    const order = rows[0];
+    if (!order) break;
+    if (order.batch_id !== batchId) continue; // it moved while we were locking: look again
+    if (restaurantId && order.restaurant_id !== restaurantId) break;
+    if (order.status === 'delivered') {
+      throw new AppError(409, 'ORDER_DELIVERED', 'This order has already been delivered.');
+    }
+    if (order.status === 'cancelled') {
+      throw new AppError(409, 'ORDER_CANCELLED', 'This order has already been cancelled.');
+    }
+    if (order.status === 'picked_up' && !allowCollected) {
+      throw new AppError(
+        409,
+        'ORDER_COLLECTED',
+        'The driver has already collected this order. Message the driver, or contact In Tha Route support.'
+      );
+    }
+
+    if (batch && ['offered', 'accepted'].includes(batch.status)) {
+      await client.query('UPDATE orders SET batch_id = NULL WHERE id = $1', [orderId]);
+      const config = await pricing.getConfig(client);
+      const { rows: rest } = await client.query(
+        `SELECT id, distance_miles, dispatch_type FROM orders WHERE batch_id = $1
+          ORDER BY batch_position ASC, created_at ASC FOR UPDATE`,
+        [batch.id]
+      );
+      for (let i = 0; i < rest.length; i++) {
+        const fin = pricing.calculateOrderFinancials(config, Number(rest[i].distance_miles), i + 1, rest[i].dispatch_type);
+        await client.query(
+          'UPDATE orders SET batch_position = $1, restaurant_fee_gbp = $2, driver_payout_gbp = $3 WHERE id = $4',
+          [i + 1, fin.restaurantFeeGbp, fin.driverPayoutGbp, rest[i].id]
+        );
+      }
+      // Stops run: every pickup in order, then every drop-off in order. Taking out an order
+      // that is not collected yet removes two stops still ahead, so the current stop stays.
+      // A collected order's pickup is already behind the driver (its drop-off is still ahead),
+      // so the current stop moves back by one to stay on the same place.
+      const index =
+        order.status === 'picked_up' && batch.status === 'accepted'
+          ? Math.max(0, batch.active_stop_index - 1)
+          : batch.active_stop_index;
+      if (rest.length === 0) {
+        await client.query(`UPDATE batches SET status = 'declined', active_stop_index = 0 WHERE id = $1`, [batch.id]);
+      } else if (batch.status === 'accepted' && index >= rest.length * 2) {
+        // Every order left was already delivered: the run is finished.
+        await client.query(
+          `UPDATE batches SET status = 'completed', completed_at = now(), active_stop_index = 0 WHERE id = $1`,
+          [batch.id]
+        );
+      } else if (index !== batch.active_stop_index) {
+        await client.query('UPDATE batches SET active_stop_index = $1 WHERE id = $2', [index, batch.id]);
+      }
+    }
+    return { order, driverUserId: order.driver_user_id || null };
+  }
+  throw new AppError(404, 'ORDER_NOT_FOUND', 'Order not found.');
+}
+
+/**
+ * Cancels an order. A restaurant can only cancel before the driver collects it, and is
+ * then not charged. An admin can also cancel a collected order: the driver already made
+ * the trip to the restaurant, so that delivery's fee and pay stay as they were.
+ */
+async function cancelOrder(orderId, { userId, restaurantId, reason = '', allowCollected = false }) {
+  return db.withTransaction(async (client) => {
+    const { order, driverUserId } = await detachFromBatch(client, orderId, { restaurantId, allowCollected });
+    const collected = order.status === 'picked_up';
+    await client.query(
+      `UPDATE orders SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2, cancel_reason = $3,
+              batch_id = NULL,
+              restaurant_fee_gbp = CASE WHEN $4 THEN restaurant_fee_gbp ELSE 0 END,
+              driver_payout_gbp = CASE WHEN $4 THEN driver_payout_gbp ELSE 0 END
+        WHERE id = $1`,
+      [orderId, userId, reason, collected]
+    );
+    return { order, driverUserId };
+  });
+}
+
+/**
+ * Admin: takes an order (not yet collected) away from its driver and puts it back in the
+ * open pool for the next driver. An in-house order becomes an open-platform order.
+ */
+async function releaseToPool(orderId) {
+  return db.withTransaction(async (client) => {
+    const { order, driverUserId } = await detachFromBatch(client, orderId);
+    if (!order.batch_id && order.dispatch_type === 'open_platform') {
+      throw new AppError(409, 'ORDER_UNASSIGNED', 'This order is already waiting for a driver.');
+    }
+    const config = await pricing.getConfig(client);
+    const fin = pricing.calculateOrderFinancials(config, Number(order.distance_miles), 1, 'open_platform');
+    await client.query(
+      `UPDATE orders SET batch_id = NULL, batch_position = 1, assigned_driver_id = NULL,
+              dispatch_type = 'open_platform', status = ${BACK_TO_POOL_STATUS},
+              restaurant_fee_gbp = $2, driver_payout_gbp = $3, no_driver_alert_at = NULL
+        WHERE id = $1`,
+      [orderId, fin.restaurantFeeGbp, fin.driverPayoutGbp]
+    );
+    if (order.assigned_driver_id) await rememberDecline(client, order.assigned_driver_id, orderId);
+    return { order, driverUserId };
+  });
+}
+
 module.exports = {
+  releaseOffer,
+  cancelOrder,
+  releaseToPool,
   currentBatch,
   countOrders,
   offerNextBatch,

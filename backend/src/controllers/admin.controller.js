@@ -65,6 +65,20 @@ async function updateRestaurantPolicy(req, res) {
   res.json({ dashboard: await buildDashboard() });
 }
 
+/** Cancels an order that is not delivered yet (even one the driver has collected). */
+async function cancelOrder(req, res) {
+  const orderId = parse(v.uuidSchema, req.params.id);
+  const { reason } = parse(v.cancelSchema, req.body || {});
+  await orders.cancelForAdmin(req.user, orderId, reason);
+  res.json({ dashboard: await buildDashboard() });
+}
+
+/** Takes an order off its driver (not yet collected) and offers it to other drivers. */
+async function releaseOrder(req, res) {
+  await orders.releaseForAdmin(parse(v.uuidSchema, req.params.id));
+  res.json({ dashboard: await buildDashboard() });
+}
+
 /** The photo a driver uploaded for one document. */
 async function documentFile(req, res) {
   const file = await kyc.getDocumentFile(parse(v.uuidSchema, req.params.id));
@@ -74,4 +88,13 @@ async function documentFile(req, res) {
   res.send(file.data);
 }
 
-module.exports = { dashboard, updatePricing, approveDriver, rejectDriver, updateRestaurantPolicy, documentFile };
+module.exports = {
+  dashboard,
+  updatePricing,
+  approveDriver,
+  rejectDriver,
+  updateRestaurantPolicy,
+  cancelOrder,
+  releaseOrder,
+  documentFile,
+};

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LiveMap, MapPin } from '@/components/LiveMap';
 import {
@@ -427,7 +427,24 @@ const STATUS_META: Record<
   ready_for_pickup: { label: 'Ready', tone: 'success' },
   picked_up: { label: 'On the way', tone: 'success' },
   delivered: { label: 'Delivered', tone: 'neutral' },
+  cancelled: { label: 'Cancelled', tone: 'neutral' },
 };
+
+/** Not possible once the driver has collected the food. */
+const canCancel = (o: LiveOrder) => o.status !== 'picked_up' && o.status !== 'delivered' && o.status !== 'cancelled';
+
+function confirmCancel(o: LiveOrder, cancel: (id: string) => Promise<boolean>) {
+  Alert.alert(
+    `Cancel ${o.externalOrderId || 'this order'}?`,
+    o.assignedDriverName
+      ? `${o.assignedDriverName.split(' ')[0]} will be told not to collect it. You will not be charged.`
+      : 'It will be taken off the board. You will not be charged.',
+    [
+      { text: 'Keep order', style: 'cancel' },
+      { text: 'Cancel order', style: 'destructive', onPress: () => void cancel(o.id) },
+    ]
+  );
+}
 
 function orderPins(orders: LiveOrder[]): MapPin[] {
   const pins: MapPin[] = [];
@@ -449,11 +466,14 @@ function orderPins(orders: LiveOrder[]): MapPin[] {
 }
 
 function LiveOrdersScreen() {
-  const { orders, markOrderReady, setActiveScreen, restaurants, activeRestaurantId } = useInThaRoute();
+  const { orders, markOrderReady, cancelOrder, setActiveScreen, restaurants, activeRestaurantId } = useInThaRoute();
   const { openForOrder } = useChat();
   const restaurant = restaurants.find((r) => r.id === activeRestaurantId);
   const active = useMemo(
-    () => orders.filter((o) => o.status !== 'delivered').sort((a, b) => a.remainingSeconds - b.remainingSeconds),
+    () =>
+      orders
+        .filter((o) => o.status !== 'delivered' && o.status !== 'cancelled')
+        .sort((a, b) => a.remainingSeconds - b.remainingSeconds),
     [orders]
   );
   const ready = active.filter((o) => o.remainingSeconds === 0 || o.status === 'ready_for_pickup').length;
@@ -520,6 +540,17 @@ function LiveOrdersScreen() {
                 </Text>
               </View>
 
+              {o.attention && (
+                <View style={styles.attention}>
+                  <Ionicons name="alert-circle" size={16} color={C.primary} />
+                  <Text style={styles.attentionText}>
+                    {o.attention === 'no_driver'
+                      ? 'No driver has taken this yet. We are still trying — you can also cancel it.'
+                      : 'Collected a while ago and not marked delivered. Message the driver to check.'}
+                  </Text>
+                </View>
+              )}
+
               <Divider />
 
               <View style={styles.rowBetween}>
@@ -547,6 +578,16 @@ function LiveOrdersScreen() {
                   )}
                 </View>
               </View>
+              {canCancel(o) && (
+                <Button
+                  label="Cancel order"
+                  icon="close"
+                  compact
+                  variant="ghost"
+                  style={styles.cancelButton}
+                  onPress={() => confirmCancel(o, cancelOrder)}
+                />
+              )}
             </Card>
           );
         })
@@ -788,6 +829,16 @@ const styles = StyleSheet.create({
 
   cardTitle: { ...Brand.type.bodyStrong, color: C.ink },
   muted: { ...Brand.type.caption, color: C.ink3, flexShrink: 1 },
+  attention: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: C.primarySoft,
+  },
+  attentionText: { ...Brand.type.caption, color: C.ink, flex: 1 },
+  cancelButton: { alignSelf: 'flex-start' },
   mutedStrong: { ...Brand.type.captionStrong, color: C.ink2, flexShrink: 1 },
   fieldLabel: { ...Brand.type.captionStrong, color: C.ink2 },
 

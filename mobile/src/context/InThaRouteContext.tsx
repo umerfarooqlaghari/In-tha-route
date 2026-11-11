@@ -69,7 +69,8 @@ export type OrderStatus =
   | 'batched_offered'
   | 'driver_assigned'
   | 'picked_up'
-  | 'delivered';
+  | 'delivered'
+  | 'cancelled';
 
 export interface LiveOrder {
   id: string;
@@ -108,6 +109,8 @@ export interface LiveOrder {
   platformMarginGbp?: number;
   /** Order pool only: what this order would pay the driver if added now. */
   nextPayoutGbp?: number;
+  /** Restaurant and admin: nobody has taken it yet, or the delivery is running late. */
+  attention?: 'no_driver' | 'late_delivery';
   createdAtLabel: string;
   pickupCoords?: LatLng | null;
   dropoffCoords?: LatLng | null;
@@ -358,6 +361,10 @@ interface InThaRouteContextType {
     customAccessCode?: string;
   }) => Promise<LiveOrder | null>;
   markOrderReady: (orderId: string) => Promise<boolean>;
+  /** Restaurant or admin: cancel an order the driver has not collected yet. */
+  cancelOrder: (orderId: string, reason?: string) => Promise<boolean>;
+  /** Admin: take an order off its driver and offer it to other drivers. */
+  releaseOrder: (orderId: string) => Promise<boolean>;
   addRestaurantOwnDriver: (params: {
     name: string;
     email: string;
@@ -695,6 +702,13 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
   const markOrderReady = (orderId: string) =>
     attempt(() => call('POST', `/api/restaurant/orders/${orderId}/ready`));
 
+  const cancelOrder = (orderId: string, reason?: string) =>
+    attempt(() =>
+      call('POST', `/api/${role === 'admin' ? 'admin' : 'restaurant'}/orders/${orderId}/cancel`, reason ? { reason } : {})
+    );
+
+  const releaseOrder = (orderId: string) => attempt(() => call('POST', `/api/admin/orders/${orderId}/release`));
+
   const addRestaurantOwnDriver: InThaRouteContextType['addRestaurantOwnDriver'] = async (p) => {
     try {
       await call('POST', '/api/restaurant/drivers', {
@@ -801,6 +815,8 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         scanReceipt,
         publishScannedOrder,
         markOrderReady,
+        cancelOrder,
+        releaseOrder,
         addRestaurantOwnDriver,
         updateRestaurantPolicy,
         pricingSummary: data?.pricingSummary ?? null,
