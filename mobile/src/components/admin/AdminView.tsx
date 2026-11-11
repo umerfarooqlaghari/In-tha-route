@@ -250,8 +250,11 @@ function PricingScreen() {
     updateAlgorithmConfig({
       baseRestaurantChargeGbp: Math.max(2.5, Math.min(12, +(algorithm.baseRestaurantChargeGbp + delta).toFixed(2))),
     });
+  // Keeps a setting inside the limits the server accepts, rounded to pennies / tenths.
+  const nudge = (key: 'baseDistanceMiles' | 'extraMileRestaurantChargeGbp' | 'extraMileDriverPayoutGbp' | 'offerRadiusMiles', delta: number, min: number, max: number) =>
+    updateAlgorithmConfig({ [key]: Math.max(min, Math.min(max, +(algorithm[key] + delta).toFixed(2))) });
   const setMax = (delta: number) => {
-    const next = Math.max(1, Math.min(5, algorithm.maxBatchSize + delta));
+    const next = Math.max(1, Math.min(8, algorithm.maxBatchSize + delta));
     updateAlgorithmConfig({ maxBatchSize: next });
     if (n > next) setSize(String(next));
   };
@@ -316,13 +319,64 @@ function PricingScreen() {
         <Divider />
         <View style={styles.settingRow}>
           <View style={styles.flexText}>
+            <Text style={styles.cardTitle}>Included distance</Text>
+            <Text style={styles.muted}>Covered by the fee</Text>
+          </View>
+          <Stepper
+            value={`${algorithm.baseDistanceMiles} mi`}
+            onDecrement={() => nudge('baseDistanceMiles', -0.5, 0.5, 20)}
+            onIncrement={() => nudge('baseDistanceMiles', 0.5, 0.5, 20)}
+          />
+        </View>
+        <Divider />
+        <View style={styles.settingRow}>
+          <View style={styles.flexText}>
+            <Text style={styles.cardTitle}>Extra mile · restaurant</Text>
+            <Text style={styles.muted}>Charged per mile beyond</Text>
+          </View>
+          <Stepper
+            value={formatGbp(algorithm.extraMileRestaurantChargeGbp)}
+            onDecrement={() => nudge('extraMileRestaurantChargeGbp', -0.05, 0, 10)}
+            onIncrement={() => nudge('extraMileRestaurantChargeGbp', 0.05, 0, 10)}
+          />
+        </View>
+        <Divider />
+        <View style={styles.settingRow}>
+          <View style={styles.flexText}>
+            <Text style={styles.cardTitle}>Extra mile · driver</Text>
+            <Text style={styles.muted}>Paid per mile beyond</Text>
+          </View>
+          <Stepper
+            value={formatGbp(algorithm.extraMileDriverPayoutGbp)}
+            onDecrement={() => nudge('extraMileDriverPayoutGbp', -0.05, 0, 10)}
+            onIncrement={() => nudge('extraMileDriverPayoutGbp', 0.05, 0, 10)}
+          />
+        </View>
+      </Card>
+
+      <SectionLabel>Drivers</SectionLabel>
+      <Card>
+        <View style={styles.settingRow}>
+          <View style={styles.flexText}>
             <Text style={styles.cardTitle}>Max batch</Text>
-            <Text style={styles.muted}>Orders per run</Text>
+            <Text style={styles.muted}>Orders a driver holds at once</Text>
           </View>
           <Stepper
             value={`${algorithm.maxBatchSize}`}
             onDecrement={() => setMax(-1)}
             onIncrement={() => setMax(1)}
+          />
+        </View>
+        <Divider />
+        <View style={styles.settingRow}>
+          <View style={styles.flexText}>
+            <Text style={styles.cardTitle}>Driver radius</Text>
+            <Text style={styles.muted}>Who sees a new order</Text>
+          </View>
+          <Stepper
+            value={`${algorithm.offerRadiusMiles} mi`}
+            onDecrement={() => nudge('offerRadiusMiles', -0.5, 0.5, 20)}
+            onIncrement={() => nudge('offerRadiusMiles', 0.5, 0.5, 20)}
           />
         </View>
       </Card>

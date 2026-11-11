@@ -19,6 +19,7 @@ const restaurantPricing = (config) => ({
   steppedDriverPayoutsGbp: [],
   maxPrepTimeWindowMinutes: config.maxPrepTimeWindowMinutes,
   maxPickupRadiusMiles: config.maxPickupRadiusMiles,
+  offerRadiusMiles: config.offerRadiusMiles,
 });
 
 async function loadRestaurant(user) {

@@ -274,6 +274,14 @@ function DriveScreen() {
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${((stopIndex + 1) / stops.length) * 100}%` }]} />
             </View>
+            {poolCount > 0 && (
+              <Pressable onPress={() => setActiveScreen('open_pool')} style={styles.poolNudge}>
+                <Ionicons name="layers-outline" size={16} color={C.primary} />
+                <Text style={styles.poolNudgeText} numberOfLines={1}>
+                  {poolCount} new {poolCount === 1 ? 'order' : 'orders'} nearby · tap to view
+                </Text>
+              </Pressable>
+            )}
 
             <View style={styles.rowGap}>
               <Badge
@@ -442,15 +450,25 @@ function SearchingRow({ poolCount }: { poolCount: number }) {
 /* ========================================================================== */
 
 function OrderPoolScreen() {
-  const { orders, algorithm, appendOrderToDriverBatch, setActiveScreen, myLocation } = useInThaRoute();
-  const { batch } = useActiveBatch();
+  const { orders, algorithm, appendOrderToDriverBatch, setActiveScreen, myLocation, capacity } = useInThaRoute();
   const { busy, run } = useBusy();
   const [toast, setToast] = useState<{ ok: boolean; message: string } | null>(null);
 
+  // The server sends only orders this driver can take: near them, while they have room.
   const pool = orders.filter(
     (o) => !o.batchId && o.status !== 'delivered' && o.dispatchType === 'open_platform'
   );
-  const full = batch.length >= algorithm.maxBatchSize;
+  const maxOrders = capacity?.maxOrders ?? algorithm.maxBatchSize;
+  const activeOrders = capacity?.activeOrders ?? 0;
+  const full = activeOrders >= maxOrders;
+  const emptyReason =
+    capacity?.poolBlockedBy === 'full'
+      ? { title: 'Your run is full', subtitle: `You have ${activeOrders} of ${maxOrders} orders. Deliver one to see new orders.` }
+      : capacity?.poolBlockedBy === 'no_location'
+        ? { title: 'Location is off', subtitle: 'Turn on location so we can show you orders nearby.' }
+        : capacity?.poolBlockedBy === 'offline'
+          ? { title: 'You’re offline', subtitle: 'Go online to see orders near you.' }
+          : { title: 'No orders nearby', subtitle: 'New orders near you appear here straight away.' };
 
   const pins: MapPin[] = [
     { id: 'driver', kind: 'driver', coordinate: myLocation ?? DRIVER_START },
@@ -480,17 +498,18 @@ function OrderPoolScreen() {
         <View style={styles.rowBetween}>
           <Text style={styles.cardTitle}>Your route</Text>
           <Text style={styles.mutedStrong}>
-            {batch.length} / {algorithm.maxBatchSize} orders
+            {activeOrders} / {maxOrders} orders
           </Text>
         </View>
         <View style={styles.progressTrack}>
           <View
             style={[
               styles.progressFill,
-              { width: `${(batch.length / algorithm.maxBatchSize) * 100}%` },
+              { width: `${Math.min(1, activeOrders / maxOrders) * 100}%` },
             ]}
           />
         </View>
+        <Text style={styles.muted}>First driver to accept an order gets it.</Text>
       </Card>
 
       {toast && (
@@ -509,7 +528,7 @@ function OrderPoolScreen() {
       <SectionLabel>{`Nearby · ${pool.length}`}</SectionLabel>
       {pool.length === 0 ? (
         <Card>
-          <EmptyState icon="layers-outline" title="Pool is empty" subtitle="New orders appear here." />
+          <EmptyState icon="layers-outline" title={emptyReason.title} subtitle={emptyReason.subtitle} />
           <Button label="Back to map" variant="secondary" onPress={() => setActiveScreen('live_route')} />
         </Card>
       ) : (
@@ -542,8 +561,8 @@ function OrderPoolScreen() {
                   {o.remainingSeconds > 0 ? `Ready ${formatCountdown(o.remainingSeconds)}` : 'Ready'}
                 </Text>
                 <Button
-                  label="Add"
-                  icon="add"
+                  label="Accept"
+                  icon="checkmark"
                   compact
                   loading={busy === o.id}
                   disabled={full || !!busy}
@@ -1056,6 +1075,16 @@ const styles = StyleSheet.create({
   historyRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   historyPay: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   earnSmall: { ...Brand.type.bodyStrong, color: C.success },
+  poolNudge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: C.primarySoft,
+  },
+  poolNudgeText: { ...Brand.type.captionStrong, color: C.ink, flexShrink: 1 },
   poolMeta: { fontSize: 17, fontWeight: '600', color: C.ink, flexShrink: 1, fontVariant: ['tabular-nums'] },
   earn: { ...Brand.type.heading, color: C.success },
   toast: {

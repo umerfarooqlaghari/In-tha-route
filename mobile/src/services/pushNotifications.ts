@@ -11,7 +11,7 @@ import { api } from '@/services/apiClient';
  * Push notifications (Expo push service → Apple APNs / Google FCM).
  *
  * What the server sends (`data.type`):
- *  - 'offer'   a platform driver was offered a batch
+ *  - 'offer'   a new order nearby in the open pool (platform drivers)
  *  - 'order'   a driver got an order / a restaurant's order was accepted, collected or delivered
  *  - 'chat'    a new message (only sent when the app is not open)
  *  - 'account' a driver's documents were approved or rejected

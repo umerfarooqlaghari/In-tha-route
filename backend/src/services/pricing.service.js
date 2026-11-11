@@ -12,6 +12,7 @@ function toConfig(row) {
     steppedDriverPayoutsGbp: row.stepped_driver_payouts_gbp.map(Number),
     maxPrepTimeWindowMinutes: row.max_prep_time_window_minutes,
     maxPickupRadiusMiles: Number(row.max_pickup_radius_miles),
+    offerRadiusMiles: Number(row.offer_radius_miles),
   };
 }
 
@@ -90,7 +91,7 @@ async function updateConfig(partial, userId) {
          extra_mile_restaurant_charge_gbp = $3, extra_mile_driver_payout_gbp = $4,
          max_batch_size = $5, stepped_driver_payouts_gbp = $6,
          max_prep_time_window_minutes = $7, max_pickup_radius_miles = $8,
-         updated_by = $9, updated_at = now()
+         offer_radius_miles = $10, updated_by = $9, updated_at = now()
        WHERE id = 1`,
       [
         next.baseDistanceMiles,
@@ -102,6 +103,7 @@ async function updateConfig(partial, userId) {
         next.maxPrepTimeWindowMinutes,
         next.maxPickupRadiusMiles,
         userId,
+        next.offerRadiusMiles,
       ]
     );
 

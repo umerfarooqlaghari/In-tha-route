@@ -6,7 +6,10 @@ const { hashPassword } = require('./password.service');
 const kyc = require('./kyc.service');
 
 const DRIVER_SELECT = `
-  SELECT d.*, u.full_name, u.email, u.phone, u.is_active, r.name AS employer_name
+  SELECT d.*, u.full_name, u.email, u.phone, u.is_active, r.name AS employer_name,
+         (SELECT count(*) FROM orders x
+           WHERE x.assigned_driver_id = d.id
+             AND x.status IN ('batched_offered', 'driver_assigned', 'picked_up'))::int AS active_orders
     FROM driver_profiles d
     JOIN users u ON u.id = d.user_id
     LEFT JOIN restaurants r ON r.id = d.employer_restaurant_id
@@ -52,6 +55,8 @@ function toProfile(row, documents = [], { self = false } = {}) {
     location: freshLocation(row),
     rating: Number(row.rating),
     completedDeliveries: row.completed_deliveries,
+    // Orders still to collect or deliver (counts towards the admin's max per run).
+    activeOrders: row.active_orders ?? 0,
     kycDocuments: documents,
   };
 }

@@ -35,17 +35,14 @@ async function signupDriver(n) {
   return { token: res.body.tokens.accessToken, id: res.body.user.driver.id };
 }
 
-/** Posts an order while every driver is offline, so it waits in the pool. */
+/** Posts a platform order: it waits in the open pool until a driver accepts it. */
 async function poolOrder(ref) {
-  await pool.query(`UPDATE driver_profiles SET status = 'offline' WHERE driver_type = 'platform_contracted'`);
   const res = await request(app).post('/api/restaurant/orders').set(bearer(restaurant)).send({
     source: 'Deliveroo', externalOrderId: ref, customerName: 'Anna T.', customerPhone: '+442033195035',
     deliveryAddress: '19 Rosemont Rd, Richmond', postcode: 'TW10 6QN', prepMinutes: 20,
     dispatchType: 'open_platform', items: [],
   });
   assert.equal(res.status, 201, JSON.stringify(res.body));
-  await new Promise((r) => setTimeout(r, 30)); // let the post-order offer round finish
-  await pool.query(`UPDATE driver_profiles SET status = 'approved_online' WHERE driver_type = 'platform_contracted'`);
   return res.body.order.id;
 }
 
@@ -53,7 +50,16 @@ async function clearRuns() {
   await pool.query(`UPDATE orders SET status = 'delivered', delivered_at = now() WHERE status <> 'delivered'`);
   await pool.query(`UPDATE batches SET status = 'completed', acknowledged = true WHERE status IN ('offered', 'accepted', 'completed')`);
   await pool.query('DELETE FROM batch_declines');
+  await pool.query(`UPDATE pricing_config SET max_batch_size = 5, offer_radius_miles = 3`);
+  // Every platform driver online, next to the restaurant, with a fresh GPS fix.
+  await pool.query(
+    `UPDATE driver_profiles SET status = 'approved_online', last_latitude = 51.462, last_longitude = -0.304,
+            last_location_at = now() WHERE driver_type = 'platform_contracted'`
+  );
 }
+
+const poolIds = async (who) =>
+  (await request(app).get('/api/driver/dashboard').set(bearer(who))).body.orders.filter((o) => !o.batchId).map((o) => o.id);
 
 const orderRow = async (id) => (await pool.query('SELECT * FROM orders WHERE id = $1', [id])).rows[0];
 
@@ -99,55 +105,124 @@ describe('two drivers going for the same order at the same moment', () => {
     }
   });
 
-  test('offers built for 5 drivers at once never put one order in two batches', async () => {
-    for (let round = 0; round < 10; round++) {
-      await clearRuns();
-      const ids = [await poolOrder(`#O${round}a`)];
-      // Every driver's app refreshes at the same moment (each refresh builds an offer).
-      await Promise.all(drivers.map((d) => request(app).get('/api/driver/dashboard').set(bearer(d))));
-      const { rows } = await pool.query(
-        `SELECT o.id, o.batch_id, b.driver_id FROM orders o JOIN batches b ON b.id = o.batch_id WHERE o.id = ANY($1::uuid[])`,
-        [ids]
-      );
-      assert.equal(rows.length, 1, `round ${round}: order is in exactly one batch`);
-      const offered = await pool.query(`SELECT count(*)::int AS n FROM batches WHERE status = 'offered'`);
-      assert.equal(offered.rows[0].n, 1, `round ${round}: only one driver holds an offer for it`);
-    }
-  });
-
-  test('accept and expiry at the same moment: the result is always consistent', async () => {
-    for (let round = 0; round < 10; round++) {
-      await clearRuns();
-      const orderId = await poolOrder(`#E${round}`);
-      const d = drivers[0];
-      await request(app).get('/api/driver/dashboard').set(bearer(d));
-      // Exactly at the time limit (inside the 15 s grace for a tap already on its way).
-      await pool.query(`UPDATE batches SET created_at = now() - interval '121 seconds' WHERE status = 'offered'`);
-      const [acceptRes] = await Promise.all([
-        request(app).post('/api/driver/batch/accept').set(bearer(d)),
-        dispatch.expireStaleOffers(),
-      ]);
-      const { rows } = await pool.query(
-        'SELECT o.batch_id, b.status FROM orders o LEFT JOIN batches b ON b.id = o.batch_id WHERE o.id = $1',
-        [orderId]
-      );
-      if (acceptRes.status === 200) {
-        assert.equal(rows[0].status, 'accepted', `round ${round}: accepted order stays with the driver`);
-      } else {
-        assert.equal(acceptRes.status, 409);
-        assert.equal(rows[0].batch_id, null, `round ${round}: withdrawn order is back in the pool`);
-      }
-    }
-  });
-
-  test('a driver whose app refreshes twice at once still gets only one offer', async () => {
+  test('a new order shows at once in the pool of every nearby driver with room', async () => {
     await clearRuns();
-    await poolOrder('#D1');
-    await poolOrder('#D2');
+    const orderId = await poolOrder('#O1');
+    // drivers[3] is full, drivers[4] is 10 miles away, everyone else is near with room.
+    await pool.query('UPDATE pricing_config SET max_batch_size = 1');
+    const other = await poolOrder('#O1x');
+    await request(app).post(`/api/driver/pool/${other}/add`).set(bearer(drivers[3]));
+    await pool.query('UPDATE driver_profiles SET last_latitude = 51.6 WHERE id = $1', [drivers[4].id]);
+
+    const told = await dispatch.notifyNearbyDrivers(orderId);
+    assert.deepEqual(told.sort(), [drivers[0].id, drivers[1].id, drivers[2].id].sort());
+    for (const d of drivers.slice(0, 3)) assert.ok((await poolIds(d)).includes(orderId));
+    const full = await request(app).get('/api/driver/dashboard').set(bearer(drivers[3]));
+    assert.deepEqual(full.body.capacity, { activeOrders: 1, maxOrders: 1, poolBlockedBy: 'full' });
+    assert.deepEqual(await poolIds(drivers[4]), [], 'too far away');
+  });
+
+  test('a full driver sees the pool again as soon as they deliver one order', async () => {
+    await clearRuns();
+    await pool.query('UPDATE pricing_config SET max_batch_size = 2');
+    const d = drivers[0];
+    const [a, b, c] = [await poolOrder('#G1a'), await poolOrder('#G1b'), await poolOrder('#G1c')];
+    await request(app).post(`/api/driver/pool/${a}/add`).set(bearer(d));
+    await request(app).post(`/api/driver/pool/${b}/add`).set(bearer(d));
+    assert.deepEqual(await poolIds(d), []);
+    const refused = await request(app).post(`/api/driver/pool/${c}/add`).set(bearer(d));
+    assert.equal(refused.body.ok, false);
+    assert.match(refused.body.message, /You already have 2 of 2 orders/);
+
+    // Pick up both, deliver the first: one place is free.
+    for (let i = 0; i < 3; i++) await request(app).post('/api/driver/batch/advance').set(bearer(d));
+    assert.deepEqual(await poolIds(d), [c]);
+    const added = await request(app).post(`/api/driver/pool/${c}/add`).set(bearer(d));
+    assert.equal(added.body.ok, true, added.body.message);
+
+    // The delivered order is filed away; the run is now b (on board) then c (to collect).
+    const dash = (await request(app).get('/api/driver/dashboard').set(bearer(d))).body;
+    assert.deepEqual(dash.orders.filter((o) => o.batchId).map((o) => o.id), [b, c]);
+    assert.equal(dash.activeStopIndex, 1, 'stops: pick up b (done), pick up c, drop b, drop c');
+    await request(app).post('/api/driver/batch/advance').set(bearer(d)); // picked up c
+    await request(app).post('/api/driver/batch/advance').set(bearer(d)); // delivered b
+    await request(app).post('/api/driver/batch/advance').set(bearer(d)); // delivered c
+    for (const id of [a, b, c]) assert.equal((await orderRow(id)).status, 'delivered');
+  });
+
+  test('admin changes the limit: it applies to every driver straight away', async () => {
+    await clearRuns();
     const d = drivers[1];
-    await Promise.all([1, 2, 3].map(() => request(app).get('/api/driver/dashboard').set(bearer(d))));
-    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM batches WHERE driver_id = $1 AND status = 'offered'`, [d.id]);
-    assert.equal(rows[0].n, 1);
+    const a = await poolOrder('#G2a');
+    const b = await poolOrder('#G2b');
+    await request(app).post(`/api/driver/pool/${a}/add`).set(bearer(d));
+    let res = await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ maxBatchSize: 1 });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(await poolIds(d), []);
+    res = await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ maxBatchSize: 3 });
+    assert.ok((await poolIds(d)).includes(b));
+  });
+
+  test('a driver without a recent location sees no pool and cannot accept', async () => {
+    await clearRuns();
+    const a = await poolOrder('#G3');
+    const d = drivers[2];
+    await pool.query('UPDATE driver_profiles SET last_location_at = now() - interval \'1 hour\' WHERE id = $1', [d.id]);
+    const dash = (await request(app).get('/api/driver/dashboard').set(bearer(d))).body;
+    assert.equal(dash.capacity.poolBlockedBy, 'no_location');
+    const res = await request(app).post(`/api/driver/pool/${a}/add`).set(bearer(d));
+    assert.equal(res.body.ok, false);
+    assert.match(res.body.message, /Turn on location/);
+  });
+});
+
+describe('in-house drivers and delivery settings', () => {
+  let own;
+  before(async () => {
+    const res = await request(app).post('/api/restaurant/drivers').set(bearer(restaurant)).send({
+      fullName: 'Ali Khan', email: 'ali@races.test', password: 'Passw0rd123', phone: '+44 7841 900099', vehicle: 'Car',
+    });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    own = res.body.dashboard.drivers.find((d) => d.name === 'Ali Khan');
+  });
+  const postOwn = (ref) =>
+    request(app).post('/api/restaurant/orders').set(bearer(restaurant)).send({
+      source: 'Just Eat', externalOrderId: ref, customerName: 'Anna T.', customerPhone: '+442033195035',
+      deliveryAddress: '19 Rosemont Rd, Richmond', postcode: 'TW10 6QN', prepMinutes: 20,
+      dispatchType: 'own_driver', ownDriverId: own.id, items: [],
+    });
+
+  test('an in-house driver at the limit cannot be given another order until they deliver one', async () => {
+    await clearRuns();
+    await pool.query('UPDATE pricing_config SET max_batch_size = 2');
+    assert.equal((await postOwn('#H1')).status, 201);
+    const second = await postOwn('#H2');
+    assert.equal(second.status, 201);
+    assert.equal(second.body.dashboard.drivers.find((d) => d.id === own.id).activeOrders, 2);
+    const third = await postOwn('#H3');
+    assert.equal(third.status, 409);
+    assert.equal(third.body.error.code, 'DRIVER_FULL');
+    assert.match(third.body.error.message, /already has 2 of 2 orders/);
+
+    // The driver delivers one: the restaurant can give them another.
+    const login = await request(app).post('/api/auth/login').send({ email: 'ali@races.test', password: 'Passw0rd123' });
+    const ali = { token: login.body.tokens.accessToken };
+    for (let i = 0; i < 3; i++) await request(app).post('/api/driver/batch/advance').set(bearer(ali));
+    const dash = await request(app).get('/api/restaurant/dashboard').set(bearer(restaurant));
+    assert.equal(dash.body.drivers.find((d) => d.id === own.id).activeOrders, 1);
+    assert.equal((await postOwn('#H3')).status, 201);
+  });
+
+  test('"My drivers only" refuses platform orders', async () => {
+    await request(app).patch('/api/restaurant/policy').set(bearer(restaurant)).send({ driverPolicy: 'own_drivers' });
+    const res = await request(app).post('/api/restaurant/orders').set(bearer(restaurant)).send({
+      source: 'Just Eat', externalOrderId: '#H9', customerName: 'Anna T.', customerPhone: '+442033195035',
+      deliveryAddress: '19 Rosemont Rd, Richmond', postcode: 'TW10 6QN', prepMinutes: 20,
+      dispatchType: 'open_platform', items: [],
+    });
+    assert.equal(res.status, 400);
+    assert.match(JSON.stringify(res.body), /My drivers only/);
+    await request(app).patch('/api/restaurant/policy').set(bearer(restaurant)).send({ driverPolicy: 'open_platform' });
   });
 });
 
@@ -159,18 +234,12 @@ describe('pool add and going offline', () => {
     assert.equal(res.body.ok, true);
     assert.equal(res.body.dashboard.driverBatchStatus, 'accepted_navigating');
     assert.equal((await orderRow(orderId)).status, 'driver_assigned');
-    // ...so the 2-minute offer timeout never takes it away.
-    await pool.query(`UPDATE batches SET created_at = now() - interval '10 minutes' WHERE driver_id = $1`, [drivers[2].id]);
-    await dispatch.expireStaleOffers();
-    assert.equal((await orderRow(orderId)).status, 'driver_assigned');
   });
 
-  test('pool "Add" waits for an offer being built instead of wrongly saying "taken"', async () => {
+  test('accepting waits for another request holding the order instead of wrongly saying "taken"', async () => {
     await clearRuns();
     const orderId = await poolOrder('#P2');
-    await pool.query(`UPDATE driver_profiles SET status = 'offline' WHERE id <> $1`, [drivers[3].id]);
-    // Hold the order's lock as if an offer were half-way through being built, then let it go
-    // without taking the order (e.g. the driver was out of range).
+    // Hold the order's lock (e.g. the restaurant marking it ready), then let it go.
     const holder = await pool.connect();
     await holder.query('BEGIN');
     await holder.query('SELECT 1 FROM orders WHERE id = $1 FOR UPDATE', [orderId]);
@@ -180,17 +249,25 @@ describe('pool add and going offline', () => {
     holder.release();
     const res = await adding;
     assert.equal(res.body.ok, true, res.body.message);
-    await pool.query(`UPDATE driver_profiles SET status = 'approved_online' WHERE driver_type = 'platform_contracted'`);
   });
 
-  test('going offline hands an unanswered offer straight back to the pool', async () => {
+  test('an offline driver sees no pool and cannot accept', async () => {
+    await clearRuns();
+    const orderId = await poolOrder('#F0');
+    const d = drivers[4];
+    await request(app).put('/api/driver/availability').set(bearer(d)).send({ online: false });
+    assert.deepEqual(await poolIds(d), []);
+    const res = await request(app).post(`/api/driver/pool/${orderId}/add`).set(bearer(d));
+    assert.equal(res.body.ok, false);
+  });
+
+  test('going offline hands an old-style unanswered offer straight back to the pool', async () => {
     await clearRuns();
     const orderId = await poolOrder('#F1');
     const d = drivers[4];
-    // Only this driver is online, so nobody else picks the order up the moment it is released.
-    await pool.query(`UPDATE driver_profiles SET status = 'offline' WHERE id <> $1`, [d.id]);
-    await request(app).get('/api/driver/dashboard').set(bearer(d));
-    assert.equal((await orderRow(orderId)).assigned_driver_id, d.id);
+    // An offer made before the open pool existed.
+    const batch = (await pool.query(`INSERT INTO batches (driver_id, status) VALUES ($1, 'offered') RETURNING id`, [d.id])).rows[0];
+    await pool.query(`UPDATE orders SET batch_id = $1, assigned_driver_id = $2, status = 'batched_offered' WHERE id = $3`, [batch.id, d.id, orderId]);
     const res = await request(app).put('/api/driver/availability').set(bearer(d)).send({ online: false });
     assert.equal(res.status, 200);
     const o = await orderRow(orderId);
@@ -199,7 +276,6 @@ describe('pool add and going offline', () => {
     // Not counted as a decline: they can get it again once back online.
     const declines = await pool.query('SELECT count(*)::int AS n FROM batch_declines WHERE driver_id = $1', [d.id]);
     assert.equal(declines.rows[0].n, 0);
-    await pool.query(`UPDATE driver_profiles SET status = 'approved_online' WHERE driver_type = 'platform_contracted'`);
   });
 });
 
@@ -297,13 +373,12 @@ describe('cancelling and moving orders', () => {
     await request(app).post(`/api/driver/pool/${a}/add`).set(bearer(first));
     const res = await request(app).post(`/api/admin/orders/${a}/release`).set(bearer(admin));
     assert.equal(res.status, 200, JSON.stringify(res.body));
-    // It is offered straight away to another online driver, never back to the first one.
-    await new Promise((r) => setTimeout(r, 100));
-    await request(app).get('/api/driver/dashboard').set(bearer(first));
+    // Back in the pool for other drivers, not for the one it was taken from.
     const o = await orderRow(a);
-    assert.notEqual(o.assigned_driver_id, null);
-    assert.notEqual(o.assigned_driver_id, first.id);
-    assert.equal(o.status, 'batched_offered');
+    assert.equal(o.batch_id, null);
+    assert.ok(!(await poolIds(first)).includes(a));
+    assert.ok((await poolIds(drivers[3])).includes(a));
+    assert.equal((await request(app).post(`/api/driver/pool/${a}/add`).set(bearer(first))).body.ok, false);
   });
 
   test('admin cancels a collected order mid-run: the driver carries on with the rest', async () => {

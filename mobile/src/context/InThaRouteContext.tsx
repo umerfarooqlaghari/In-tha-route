@@ -150,6 +150,8 @@ export interface DriverProfile {
   location?: (LatLng & { updatedAt: string }) | null;
   rating: number;
   completedDeliveries: number;
+  /** Orders still to collect or deliver; at the admin's max the driver can take no more. */
+  activeOrders?: number;
   niNumber?: string;
   bankAccount?: string;
   kycDocuments: KycDocument[];
@@ -177,6 +179,16 @@ export interface AlgorithmConfig {
   steppedDriverPayoutsGbp: number[];
   maxPrepTimeWindowMinutes: number;
   maxPickupRadiusMiles: number;
+  /** Platform drivers within this many miles of the restaurant see a new order. */
+  offerRadiusMiles: number;
+}
+
+/** How full a driver's run is (the admin's max orders at once applies to every driver). */
+export interface DriverCapacity {
+  activeOrders: number;
+  maxOrders: number;
+  /** Why the open pool is empty for this driver, if it is. */
+  poolBlockedBy: 'offline' | 'no_location' | 'full' | null;
 }
 
 export interface DriverEarnings {
@@ -232,6 +244,7 @@ interface Dashboard {
   isOnline?: boolean;
   routeEstimate?: RouteEstimate | null;
   earnings?: DriverEarnings;
+  capacity?: DriverCapacity;
   pricingSummary?: PricingSummary;
   totals?: AdminTotals;
 }
@@ -253,7 +266,7 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
   ],
   driver: [
     { key: 'live_route', title: 'Drive', subtitle: 'Offers & navigation', icon: 'navigate-outline' },
-    { key: 'open_pool', title: 'Order pool', subtitle: 'Add orders to your route', icon: 'layers-outline' },
+    { key: 'open_pool', title: 'Order pool', subtitle: 'Orders near you · first to accept', icon: 'layers-outline' },
     { key: 'messages', title: 'Messages', subtitle: 'Chats with restaurants', icon: 'chatbubbles-outline' },
     { key: 'earnings', title: 'Earnings', subtitle: 'Payouts & trips', icon: 'wallet-outline' },
     { key: 'order_history', title: 'Past orders', subtitle: 'Deliveries & pay', icon: 'receipt-outline' },
@@ -277,6 +290,7 @@ const DEFAULT_ALGORITHM: AlgorithmConfig = {
   steppedDriverPayoutsGbp: [4.0, 3.2, 2.8, 2.5, 2.2, 2.0, 1.9, 1.8],
   maxPrepTimeWindowMinutes: 15,
   maxPickupRadiusMiles: 0.8,
+  offerRadiusMiles: 3,
 };
 
 const POLL_MS = 12_000;
@@ -338,6 +352,7 @@ interface InThaRouteContextType {
   myLocation: LatLng | null;
   routeEstimate: RouteEstimate | null;
   earnings: DriverEarnings | null;
+  capacity: DriverCapacity | null;
   currentBatchId: string | null;
   driverBatchStatus: BatchStatus;
   activeStopIndex: number;
@@ -551,7 +566,9 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
   usePushNotifications(isLoggedIn && (role === 'driver' || role === 'restaurant'), {
     onActivity: refreshDashboard,
     onOpen: (data) => {
-      if (data?.type === 'offer' || data?.type === 'order') {
+      if (data?.type === 'offer' && roleRef.current === 'driver') {
+        setActiveScreen('open_pool'); // a new order nearby: first to accept gets it
+      } else if (data?.type === 'offer' || data?.type === 'order') {
         const home = roleRef.current ? ROLE_SCREENS[roleRef.current][0].key : null;
         if (home) setActiveScreen(home);
       }
@@ -803,6 +820,7 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         myLocation,
         routeEstimate: data?.routeEstimate ?? null,
         earnings: data?.earnings ?? null,
+        capacity: data?.capacity ?? null,
         currentBatchId: data?.currentBatchId ?? null,
         driverBatchStatus: data?.driverBatchStatus ?? 'declined',
         activeStopIndex: data?.activeStopIndex ?? 0,

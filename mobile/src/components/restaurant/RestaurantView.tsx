@@ -79,12 +79,16 @@ function StepProgress({ step }: { step: Step }) {
 }
 
 function NewOrderScreen() {
-  const { publishScannedOrder, scanReceipt, orders, drivers, restaurants, activeRestaurantId, setActiveScreen } =
+  const { publishScannedOrder, scanReceipt, orders, drivers, restaurants, activeRestaurantId, setActiveScreen, algorithm } =
     useInThaRoute();
   const restaurant = restaurants.find((r) => r.id === activeRestaurantId) ?? restaurants[0];
-  const ownDrivers = drivers.filter(
+  const myDrivers = drivers.filter(
     (d) => d.driverType === 'restaurant_own' && d.employerRestaurantId === restaurant.id
   );
+  // A driver already holding the max number of orders is hidden until they deliver one
+  // (the list refreshes every few seconds).
+  const ownDrivers = myDrivers.filter((d) => (d.activeOrders ?? 0) < algorithm.maxBatchSize);
+  const platformAllowed = restaurant.driverPolicy !== 'own_drivers';
 
   const [step, setStep] = useState<Step>('scan');
   const [template, setTemplate] = useState<ReceiptTemplate | null>(null);
@@ -98,7 +102,9 @@ function NewOrderScreen() {
   const [dispatch, setDispatch] = useState<'open_platform' | 'own_driver'>(
     restaurant.driverPolicy === 'own_drivers' ? 'own_driver' : 'open_platform'
   );
-  const [ownDriverId, setOwnDriverId] = useState<string | undefined>(ownDrivers[0]?.id);
+  const [pickedDriverId, setOwnDriverId] = useState<string | undefined>(ownDrivers[0]?.id);
+  // If the chosen driver fills up meanwhile, fall back to the first one with room.
+  const ownDriverId = ownDrivers.some((d) => d.id === pickedDriverId) ? pickedDriverId : ownDrivers[0]?.id;
   const [published, setPublished] = useState<LiveOrder | null>(null);
 
   // Camera ("Scan receipt") or photo library ("Upload receipt"); the server reads it with OCR.
@@ -126,8 +132,8 @@ function NewOrderScreen() {
     const order = await publishScannedOrder({
       template,
       prepMinutes: prep,
-      dispatchType: dispatch,
-      ownDriverId: dispatch === 'own_driver' ? ownDriverId : undefined,
+      dispatchType: platformAllowed ? dispatch : 'own_driver',
+      ownDriverId: dispatch === 'own_driver' || !platformAllowed ? ownDriverId : undefined,
       customAddress: address.trim(),
       customPostcode: postcode.trim(),
       customAccessCode: accessCode.trim(),
@@ -326,14 +332,18 @@ function NewOrderScreen() {
           <Card>
             <Text style={styles.cardTitle}>Who delivers?</Text>
             <Segmented
-              value={dispatch}
+              value={platformAllowed ? dispatch : 'own_driver'}
               onChange={setDispatch}
-              options={[
-                { value: 'open_platform', label: 'Platform driver' },
-                { value: 'own_driver', label: 'My driver' },
-              ]}
+              options={
+                platformAllowed
+                  ? [
+                      { value: 'open_platform', label: 'Platform driver' },
+                      { value: 'own_driver', label: 'My driver' },
+                    ]
+                  : [{ value: 'own_driver', label: 'My driver' }]
+              }
             />
-            {dispatch === 'own_driver' ? (
+            {dispatch === 'own_driver' || !platformAllowed ? (
               ownDrivers.length ? (
                 ownDrivers.map((d) => (
                   <ListRow
@@ -341,7 +351,7 @@ function NewOrderScreen() {
                     onPress={() => setOwnDriverId(d.id)}
                     left={<Avatar name={d.name} tone="info" size={36} />}
                     title={d.name}
-                    subtitle={d.vehicle}
+                    subtitle={`${d.vehicle} · ${d.activeOrders ?? 0}/${algorithm.maxBatchSize} orders`}
                     right={
                       <Ionicons
                         name={ownDriverId === d.id ? 'radio-button-on' : 'radio-button-off'}
@@ -351,6 +361,10 @@ function NewOrderScreen() {
                     }
                   />
                 ))
+              ) : myDrivers.length ? (
+                <Hint>
+                  {`All your drivers already have ${algorithm.maxBatchSize} orders. A driver shows here again as soon as they deliver one.`}
+                </Hint>
               ) : (
                 <Hint>Add a driver under My drivers first.</Hint>
               )
@@ -369,7 +383,7 @@ function NewOrderScreen() {
               icon="send"
               onPress={post}
               loading={posting}
-              disabled={posting || (dispatch === 'own_driver' && !ownDriverId)}
+              disabled={posting || ((dispatch === 'own_driver' || !platformAllowed) && !ownDriverId)}
               style={styles.flex2}
             />
           </View>

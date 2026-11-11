@@ -19,6 +19,7 @@ const driverPricing = (config) => ({
   steppedDriverPayoutsGbp: config.steppedDriverPayoutsGbp,
   maxPrepTimeWindowMinutes: config.maxPrepTimeWindowMinutes,
   maxPickupRadiusMiles: config.maxPickupRadiusMiles,
+  offerRadiusMiles: config.offerRadiusMiles,
 });
 
 // Typical average speeds in town, used for the "~min" estimate on an offer.
@@ -83,28 +84,30 @@ async function routeEstimate(row, batchOrders, fromStop) {
 const BATCH_STATUS = { offered: 'offered', accepted: 'accepted_navigating', completed: 'accepted_navigating' };
 
 /** Everything the driver screens show, in one response. */
-async function buildDashboard(user, { offer = true } = {}) {
+async function buildDashboard(user) {
   let { row, profile } = await drivers.getSelf(user.driver_id);
   const approved = drivers.isApproved(row.status);
   const platform = row.driver_type === 'platform_contracted';
 
-  // An online platform driver with nothing to do is offered the next batch.
-  if (offer && platform && row.status === 'approved_online') {
-    await dispatch.offerNextBatch(row.id).catch((err) => console.error('Offer failed:', err.message));
-  }
-
   const config = await pricing.getConfig();
   const batch = approved ? await dispatch.currentBatch(db, row.id) : null;
   const batchOrders = batch ? await orders.listBatch(batch.id, { maskDelivered: batch.status === 'accepted' }) : [];
-  const openCount = batch && batch.status !== 'completed' ? batchOrders.length : 0;
-  const pool = approved && platform ? await orders.listPool(config, openCount) : [];
+  // Platform drivers see the open pool near them while they have room in their run.
+  const pool = approved && platform ? await orders.listPool(row, config) : null;
 
   return {
     role: 'driver',
     me: profile,
     drivers: [profile],
     restaurants: [],
-    orders: [...batchOrders, ...pool],
+    orders: [...batchOrders, ...(pool ? pool.orders : [])],
+    // How full the driver's run is (the admin's max applies to every driver), and why the
+    // pool is empty for them if it is: 'offline' | 'no_location' | 'full'.
+    capacity: {
+      activeOrders: pool ? pool.room.activeOrders : profile.activeOrders,
+      maxOrders: config.maxBatchSize,
+      poolBlockedBy: pool && pool.room.reason !== 'not_platform' ? pool.room.reason : null,
+    },
     algorithm: driverPricing(config),
     currentBatchId: batch ? batch.id : null,
     driverBatchStatus: batch ? BATCH_STATUS[batch.status] : 'declined',
@@ -125,8 +128,11 @@ async function setAvailability(req, res) {
   const { online } = parse(v.availabilitySchema, req.body);
   await drivers.setOnline(req.user.driver_id, online);
   // Going offline hands an unanswered offer to the next driver straight away.
-  if (!online && (await dispatch.releaseOffer(req.user.driver_id))) {
-    push.later(() => dispatch.offerOpenOrders());
+  if (!online) {
+    const released = await dispatch.releaseOffer(req.user.driver_id);
+    push.later(async () => {
+      for (const id of released) await dispatch.notifyNearbyDrivers(id);
+    });
   }
   res.json({ dashboard: await buildDashboard(req.user) });
 }
@@ -151,17 +157,18 @@ async function acceptBatch(req, res) {
 }
 
 async function declineBatch(req, res) {
-  await dispatch.decline(req.user.driver_id);
-  // The released orders go to another online driver.
-  push.later(() => dispatch.offerOpenOrders());
-  // Do not immediately build another offer in the same response.
-  res.json({ dashboard: await buildDashboard(req.user, { offer: false }) });
+  const released = await dispatch.decline(req.user.driver_id);
+  // The released orders go back to the pool for drivers nearby.
+  push.later(async () => {
+    for (const id of released) await dispatch.notifyNearbyDrivers(id);
+  });
+  res.json({ dashboard: await buildDashboard(req.user) });
 }
 
 async function advanceStop(req, res) {
   const { orderId, kind } = await dispatch.advance(req.user.driver_id);
   push.later(() => push.orderUpdate([orderId], kind));
-  res.json({ dashboard: await buildDashboard(req.user, { offer: false }) });
+  res.json({ dashboard: await buildDashboard(req.user) });
 }
 
 /** "Find new orders" / "Refresh". */
@@ -174,7 +181,7 @@ async function addPoolOrder(req, res) {
   const orderId = parse(v.uuidSchema, req.params.id);
   const { orderId: added, accepted, ...result } = await dispatch.appendPoolOrder(req.user.driver_id, orderId);
   if (added && accepted) push.later(() => push.orderUpdate([added], 'accepted'));
-  res.json({ ...result, dashboard: await buildDashboard(req.user, { offer: false }) });
+  res.json({ ...result, dashboard: await buildDashboard(req.user) });
 }
 
 async function uploadDocument(req, res) {
@@ -187,7 +194,7 @@ async function uploadDocument(req, res) {
     imageBase64,
     mimeType,
   });
-  res.json({ dashboard: await buildDashboard(req.user, { offer: false }) });
+  res.json({ dashboard: await buildDashboard(req.user) });
 }
 
 module.exports = {

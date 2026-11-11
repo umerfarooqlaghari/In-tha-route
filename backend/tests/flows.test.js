@@ -126,7 +126,7 @@ describe('push tokens', () => {
   });
 });
 
-describe('order → offer → delivery', () => {
+describe('order → open pool → delivery', () => {
   let orderId;
 
   test('the driver goes online at a known position', async () => {
@@ -136,7 +136,7 @@ describe('order → offer → delivery', () => {
     assert.equal(res.status, 204);
   });
 
-  test('a posted order is pinned to the door, priced on road miles, and offered by push', async () => {
+  test('a posted order is pinned to the door, priced on road miles, and pushed to nearby drivers', async () => {
     const res = await request(app).post('/api/restaurant/orders').set(bearer(restaurant)).send({
       source: 'Deliveroo', externalOrderId: '#8680', customerName: 'Anna T.', customerPhone: '+442033195035',
       deliveryAddress: '19 Rosemont Rd, Richmond', postcode: 'TW10 6QN', prepMinutes: 20,
@@ -153,14 +153,19 @@ describe('order → offer → delivery', () => {
     assert.ok(pricing, 'fees use traffic-free distance');
 
     const offer = await waitFor(() => calls.push.find((m) => m.to === DRIVER_PHONE && m.data.type === 'offer'), 'offer push');
-    assert.match(offer.title, /^New offer · £\d+\.\d\d$/);
-    assert.match(offer.body, /1 order from Saffron/);
+    assert.match(offer.title, /^New order nearby · £\d+\.\d\d$/);
+    assert.equal(offer.body, 'Saffron to TW10 6QN. First driver to accept gets it.');
+    assert.equal(offer.data.orderId, orderId);
     assert.equal(offer.priority, 'high');
   });
 
-  test('the offer shows road miles, a traffic-aware ETA and the route line', async () => {
-    const res = await request(app).get('/api/driver/dashboard').set(bearer(driver));
-    assert.equal(res.body.driverBatchStatus, 'offered');
+  test('the driver accepts it from the pool and sees road miles, a traffic-aware ETA and the route line', async () => {
+    let res = await request(app).get('/api/driver/dashboard').set(bearer(driver));
+    assert.ok(res.body.orders.some((o) => o.id === orderId && !o.batchId), 'in the pool');
+    res = await request(app).post(`/api/driver/pool/${orderId}/add`).set(bearer(driver));
+    assert.equal(res.body.ok, true, res.body.message);
+    res = await request(app).get('/api/driver/dashboard').set(bearer(driver));
+    assert.equal(res.body.driverBatchStatus, 'accepted_navigating');
     const est = res.body.routeEstimate;
     assert.equal(est.source, 'road');
     assert.equal(est.polyline, '_p~iF~ps|U_ulLnnqC');
@@ -172,8 +177,6 @@ describe('order → offer → delivery', () => {
   });
 
   test('accepting tells the restaurant the driver is on the way', async () => {
-    const res = await request(app).post('/api/driver/batch/accept').set(bearer(driver));
-    assert.equal(res.status, 200, JSON.stringify(res.body));
     const msg = await waitFor(() => calls.push.find((m) => m.to === RESTAURANT_PHONE && m.title === 'Driver on the way'), 'accepted push');
     assert.equal(msg.body, 'Gustavo accepted #8680 and is heading to you.');
   });
@@ -206,7 +209,7 @@ describe('order → offer → delivery', () => {
   });
 });
 
-describe('unanswered offers', () => {
+describe('old-style offers (made before the open pool)', () => {
   test('an offer nobody answers is withdrawn and the order goes back to the pool', async () => {
     await request(app).post('/api/driver/batch/next').set(bearer(driver)).expect(200); // finish the last run
     const before = calls.push.length;
@@ -217,7 +220,9 @@ describe('unanswered offers', () => {
     });
     assert.equal(res.status, 201, JSON.stringify(res.body));
     const orderId = res.body.order.id;
-    await waitFor(() => calls.push.slice(before).find((m) => m.data.type === 'offer'), 'second offer push');
+    await waitFor(() => calls.push.slice(before).find((m) => m.data.type === 'offer'), 'second order push');
+    const batch = (await pool.query(`INSERT INTO batches (driver_id, status) VALUES ($1, 'offered') RETURNING id`, [driver.id])).rows[0];
+    await pool.query(`UPDATE orders SET batch_id = $1, assigned_driver_id = $2, status = 'batched_offered' WHERE id = $3`, [batch.id, driver.id, orderId]);
 
     // Three minutes pass without an answer.
     await pool.query(`UPDATE batches SET created_at = now() - interval '3 minutes' WHERE status = 'offered'`);
@@ -230,8 +235,8 @@ describe('unanswered offers', () => {
     const { rows } = await pool.query('SELECT batch_id, status FROM orders WHERE id = $1', [orderId]);
     assert.equal(rows[0].batch_id, null);
     assert.ok(['preparing', 'ready_for_pickup'].includes(rows[0].status), rows[0].status);
-    // The same driver is not offered it again straight away.
-    assert.deepEqual(await dispatch.offerOpenOrders(), []);
+    // It is not shown back to the same driver straight away.
+    assert.deepEqual(await dispatch.notifyNearbyDrivers(orderId), []);
   });
 });
 

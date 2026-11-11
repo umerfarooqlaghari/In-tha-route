@@ -128,25 +128,42 @@ async function listBatch(batchId, { maskDelivered }) {
   return rows.map((r) => toLiveOrder(r, { view: 'driver', maskDelivered }));
 }
 
-/** Open orders a platform driver could add to their route, with what each would pay them next. */
-async function listPool(config, currentBatchSize) {
+/**
+ * The open pool as one platform driver sees it: open orders within the driver radius of
+ * where they are, while they have room in their run. Each shows what it would pay them.
+ * @returns {Promise<{orders: object[], room: object}>}
+ */
+async function listPool(driverRow, config) {
+  const room = await dispatch.driverRoom(db, driverRow, config);
+  if (room.reason) return { orders: [], room };
   const { rows } = await db.query(
     `${ORDER_SELECT}
       WHERE o.batch_id IS NULL AND o.dispatch_type = 'open_platform'
         AND o.status IN ('preparing', 'ready_for_pickup')
-      ORDER BY o.ready_at ASC LIMIT 50`
+        AND NOT EXISTS (
+              SELECT 1 FROM batch_declines x
+               WHERE x.driver_id = $1 AND x.order_id = o.id
+                 AND x.created_at > now() - make_interval(mins => $2))
+      ORDER BY o.ready_at ASC LIMIT 100`,
+    [driverRow.id, dispatch.REOFFER_AFTER_MINUTES]
   );
-  return rows.map((r) =>
-    toLiveOrder(r, {
-      view: 'pool',
-      nextPayoutGbp: pricing.calculateOrderFinancials(
-        config,
-        Number(r.distance_miles),
-        currentBatchSize + 1,
-        'open_platform'
-      ).driverPayoutGbp,
-    })
-  );
+  const orders = rows
+    .filter((r) =>
+      dispatch.withinReach(room.here, coordsOf(r.pickup_latitude, r.pickup_longitude), config)
+    )
+    .slice(0, 50)
+    .map((r) =>
+      toLiveOrder(r, {
+        view: 'pool',
+        nextPayoutGbp: pricing.calculateOrderFinancials(
+          config,
+          Number(r.distance_miles),
+          room.activeOrders + 1,
+          'open_platform'
+        ).driverPayoutGbp,
+      })
+    );
+  return { orders, room };
 }
 
 /**
@@ -194,6 +211,15 @@ async function createOrder(user, input) {
   const config = await pricing.getConfig();
   const restaurant = await restaurants.ensureCoords(await restaurants.getWithCounts(user.restaurant_id));
   await rejectDuplicate(db, restaurant.id, input); // fail fast, before the address lookups
+
+  if (input.dispatchType === 'open_platform' && restaurant.driver_policy === 'own_drivers') {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed.', [
+      {
+        field: 'dispatchType',
+        message: 'Your delivery settings are "My drivers only". Choose one of your drivers, or change the setting.',
+      },
+    ]);
+  }
 
   if (input.dispatchType === 'own_driver') {
     const { rows } = await db.query(
@@ -260,7 +286,7 @@ async function createOrder(user, input) {
 
   // Tell drivers straight away (push), without delaying the restaurant's response.
   push.later(() =>
-    input.dispatchType === 'own_driver' ? push.ownDriverAssigned(orderId) : dispatch.offerOpenOrders()
+    input.dispatchType === 'own_driver' ? push.ownDriverAssigned(orderId) : dispatch.notifyNearbyDrivers(orderId)
   );
 
   const { rows } = await db.query(`${ORDER_SELECT} WHERE o.id = $1`, [orderId]);
@@ -282,10 +308,7 @@ async function markReady(restaurantId, orderId) {
 /** The restaurant cancels one of its orders (before the driver has collected it). */
 async function cancelForRestaurant(user, orderId, reason) {
   const { order } = await dispatch.cancelOrder(orderId, { userId: user.id, restaurantId: user.restaurant_id, reason });
-  push.later(async () => {
-    await push.orderRemovedFromRun(order, 'cancelled');
-    if (order.dispatch_type === 'open_platform' && order.batch_id) await dispatch.offerOpenOrders();
-  });
+  push.later(() => push.orderRemovedFromRun(order, 'cancelled'));
 }
 
 /** Admin cancels any order that is not delivered yet, collected or not. */
@@ -302,7 +325,7 @@ async function releaseForAdmin(orderId) {
   const { order } = await dispatch.releaseToPool(orderId);
   push.later(async () => {
     await push.orderRemovedFromRun(order, 'released');
-    await dispatch.offerOpenOrders();
+    await dispatch.notifyNearbyDrivers(order.id);
   });
 }
 

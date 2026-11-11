@@ -78,13 +78,14 @@ const pricingSchema = z
     baseRestaurantChargeGbp: z.number().min(2.5, 'Restaurant fee must be at least £2.50.').max(12, 'Restaurant fee must be at most £12.00.'),
     extraMileRestaurantChargeGbp: z.number().min(0).max(10),
     extraMileDriverPayoutGbp: z.number().min(0).max(10),
-    maxBatchSize: z.number().int().min(1, 'Max batch must be at least 1.').max(5, 'Max batch must be at most 5.'),
+    maxBatchSize: z.number().int().min(1, 'Max batch must be at least 1.').max(8, 'Max batch must be at most 8.'),
     steppedDriverPayoutsGbp: z
       .array(z.number().min(0.5, 'Driver pay must be at least £0.50.').max(8, 'Driver pay must be at most £8.00.'))
       .min(1)
       .max(8),
     maxPrepTimeWindowMinutes: z.number().int().min(1).max(120),
     maxPickupRadiusMiles: z.number().min(0).max(20),
+    offerRadiusMiles: z.number().min(0.5, 'Driver radius must be at least 0.5 miles.').max(20, 'Driver radius must be at most 20 miles.'),
   })
   .partial()
   .refine((o) => Object.keys(o).length > 0, { message: 'Nothing to update.' });

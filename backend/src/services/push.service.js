@@ -181,6 +181,15 @@ async function driverReviewed(driverId, approved) {
     : { title: 'Documents need attention', body: 'Some of your documents were not accepted. Open the app to upload them again.', data: { type: 'account' } });
 }
 
+/** A new order in the open pool near a driver who has room for it. First to accept gets it. */
+async function newOrderNearby(userId, order) {
+  return sendToUsers([userId], {
+    title: `New order nearby · ${gbp(order.pay)}`,
+    body: `${order.restaurant} to ${order.postcode}. First driver to accept gets it.`,
+    data: { type: 'offer', orderId: order.id },
+  });
+}
+
 const adminUserIds = async () =>
   (await db.query(`SELECT id FROM users WHERE role = 'admin' AND is_active`)).rows.map((r) => r.id);
 
@@ -257,6 +266,7 @@ async function attentionAlert(orderId, kind) {
 }
 
 module.exports = {
+  newOrderNearby,
   orderRemovedFromRun,
   orderCancelledByAdmin,
   attentionAlert,
