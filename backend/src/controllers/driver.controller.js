@@ -6,6 +6,7 @@ const geo = require('../services/geo.service');
 const kyc = require('../services/kyc.service');
 const orders = require('../services/order.service');
 const pricing = require('../services/pricing.service');
+const push = require('../services/push.service');
 const v = require('../validators/app.validator');
 
 /** A driver sees what they are paid, never what restaurants are charged. */
@@ -24,11 +25,16 @@ const driverPricing = (config) => ({
 const SPEED_MPH = { 'Motorcycle / Scooter': 16, Car: 14, 'E-Bike': 11 };
 const MINUTES_PER_STOP = 3;
 
+// Re-ask Google for the live route at most this often per driver (it is polled every ~12 s).
+const ROUTE_REFRESH_SECONDS = Number(process.env.ROUTE_REFRESH_SECONDS) > 0 ? Number(process.env.ROUTE_REFRESH_SECONDS) : 180;
+
 /**
- * Miles and minutes for the stops still to do, starting from where the driver
- * is (if the app has sent a recent GPS fix). Stops: all pickups, then all drop-offs.
+ * Miles, minutes and the route line for the stops still to do, starting from where the
+ * driver is (if the app has sent a recent GPS fix). Stops: all pickups, then all drop-offs.
+ * Uses Google road routing with live traffic when set up; otherwise straight lines at a
+ * typical town speed. `polyline` is a Google encoded polyline, or '' when not available.
  */
-function routeEstimate(row, batchOrders, fromStop) {
+async function routeEstimate(row, batchOrders, fromStop) {
   const stops = [
     ...batchOrders.map((o) => o.pickupCoords),
     ...batchOrders.map((o) => o.dropoffCoords),
@@ -36,23 +42,41 @@ function routeEstimate(row, batchOrders, fromStop) {
   if (stops.length === 0) return null;
 
   let miles = 0;
-  let previous = drivers.freshLocation(row);
+  const start = drivers.freshLocation(row);
+  let previous = start;
   let stopCount = 0;
   let lastPickup = null;
+  const path = start ? [start] : [];
   stops.forEach((point, i) => {
     const isPickup = i + fromStop < batchOrders.length;
     // Several orders from one restaurant are a single stop.
     const samePickup = isPickup && lastPickup && point && point.latitude === lastPickup.latitude && point.longitude === lastPickup.longitude;
-    if (!samePickup) stopCount += 1;
+    if (!samePickup) {
+      stopCount += 1;
+      if (point) path.push(point);
+    }
     if (isPickup) lastPickup = point;
     if (point && previous) miles += geo.deliveryMiles(previous, point);
     if (point) previous = point;
   });
 
   const speed = SPEED_MPH[row.vehicle] || 14;
+  const road = await geo.drivingRoute(path, { traffic: true, cacheSeconds: ROUTE_REFRESH_SECONDS, keyPlaces: 3 });
+  if (road) {
+    // Google drives a car; an e-bike is slower than that, so its time comes from its own speed.
+    const driveMinutes = row.vehicle === 'E-Bike' ? (road.miles / speed) * 60 : road.minutes;
+    return {
+      miles: road.miles,
+      minutes: Math.max(1, Math.round(driveMinutes + stopCount * MINUTES_PER_STOP)),
+      polyline: road.polyline,
+      source: 'road',
+    };
+  }
   return {
     miles: Number(miles.toFixed(1)),
     minutes: Math.max(1, Math.round((miles / speed) * 60 + stopCount * MINUTES_PER_STOP)),
+    polyline: '',
+    source: 'straight',
   };
 }
 
@@ -87,7 +111,7 @@ async function buildDashboard(user, { offer = true } = {}) {
     activeStopIndex: batch && batch.status === 'accepted' ? batch.active_stop_index : 0,
     isOnline: row.status === 'approved_online',
     routeEstimate: batch && batch.status !== 'completed'
-      ? routeEstimate(row, batchOrders, batch.status === 'accepted' ? batch.active_stop_index : 0)
+      ? await routeEstimate(row, batchOrders, batch.status === 'accepted' ? batch.active_stop_index : 0)
       : null,
     earnings: await drivers.earnings(row),
   };
@@ -117,18 +141,22 @@ async function updateLocation(req, res) {
 }
 
 async function acceptBatch(req, res) {
-  await dispatch.accept(req.user.driver_id);
+  const orderIds = await dispatch.accept(req.user.driver_id);
+  push.later(() => push.orderUpdate(orderIds, 'accepted'));
   res.json({ dashboard: await buildDashboard(req.user) });
 }
 
 async function declineBatch(req, res) {
   await dispatch.decline(req.user.driver_id);
+  // The released orders go to another online driver.
+  push.later(() => dispatch.offerOpenOrders());
   // Do not immediately build another offer in the same response.
   res.json({ dashboard: await buildDashboard(req.user, { offer: false }) });
 }
 
 async function advanceStop(req, res) {
-  await dispatch.advance(req.user.driver_id);
+  const { orderId, kind } = await dispatch.advance(req.user.driver_id);
+  push.later(() => push.orderUpdate([orderId], kind));
   res.json({ dashboard: await buildDashboard(req.user, { offer: false }) });
 }
 

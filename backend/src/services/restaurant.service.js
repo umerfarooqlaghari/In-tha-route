@@ -39,10 +39,10 @@ async function listWithCounts(client = db) {
   return rows;
 }
 
-/** Looks up and stores the restaurant's coordinates the first time they are needed. */
+/** Looks up and stores the restaurant's coordinates (its door when Google is set up) the first time they are needed. */
 async function ensureCoords(row, client = db) {
   if (row.latitude != null && row.longitude != null) return row;
-  const hit = await geo.lookupPostcode(row.postcode);
+  const hit = await geo.locateAddress(row.address, row.postcode);
   if (hit.status !== 'ok') return row;
   await client.query('UPDATE restaurants SET latitude = $1, longitude = $2 WHERE id = $3', [
     hit.latitude,

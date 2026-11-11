@@ -128,4 +128,33 @@ router.post('/refresh', authLimiter, asyncHandler(controller.refresh));
 router.post('/logout', asyncHandler(controller.logout));
 router.get('/me', authenticate, asyncHandler(controller.me));
 
+/**
+ * @swagger
+ * /api/auth/push-token:
+ *   put:
+ *     summary: Register this phone's Expo push token for the signed-in user
+ *     tags: [Auth]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token]
+ *             properties:
+ *               token: { type: string, example: "ExponentPushToken[xxxxxxxx]" }
+ *               platform: { type: string, enum: [ios, android, unknown] }
+ *     responses:
+ *       204: { description: Saved }
+ *   delete:
+ *     summary: Stop push notifications to this phone
+ *     tags: [Auth]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       204: { description: Removed }
+ */
+router.put('/push-token', authenticate, asyncHandler(controller.savePushToken));
+router.delete('/push-token', authenticate, asyncHandler(controller.removePushToken));
+
 module.exports = router;

@@ -11,6 +11,7 @@ import {
   setApiSession,
 } from '@/services/apiClient';
 import { useDriverLocation } from '@/services/driverLocation';
+import { unregisterForPush, usePushNotifications } from '@/services/pushNotifications';
 import { clearSession, loadSession, saveSession } from '@/services/sessionStore';
 import type { PickedImage } from '@/utils/pickImage';
 
@@ -208,6 +209,9 @@ type BatchStatus = 'offered' | 'accepted_navigating' | 'declined';
 export interface RouteEstimate {
   miles: number;
   minutes: number;
+  /** Google encoded road route from the driver through the remaining stops; '' when not available. */
+  polyline?: string;
+  source?: 'road' | 'straight';
 }
 
 /** What `GET /api/{role}/dashboard` returns. Every change endpoint returns a fresh one too. */
@@ -437,8 +441,11 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
 
   const logout = () => {
     const token = currentRefreshToken();
-    if (token) logoutRequest(token);
-    signOutLocally();
+    // Stop notifications to this phone first (needs the session), but never wait long for it.
+    Promise.race([unregisterForPush(), new Promise((r) => setTimeout(r, 3000))]).finally(() => {
+      if (token) logoutRequest(token);
+      signOutLocally();
+    });
   };
 
   // On launch: reopen the saved account straight away, then confirm it with the
@@ -532,6 +539,17 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
       sub.remove();
     };
   }, [isLoggedIn, role, refreshDashboard]);
+
+  // Push notifications: refresh when one arrives; tapping an offer or order opens its screen.
+  usePushNotifications(isLoggedIn && (role === 'driver' || role === 'restaurant'), {
+    onActivity: refreshDashboard,
+    onOpen: (data) => {
+      if (data?.type === 'offer' || data?.type === 'order') {
+        const home = roleRef.current ? ROLE_SCREENS[roleRef.current][0].key : null;
+        if (home) setActiveScreen(home);
+      }
+    },
+  });
 
   // One clock for every countdown on screen.
   useEffect(() => {

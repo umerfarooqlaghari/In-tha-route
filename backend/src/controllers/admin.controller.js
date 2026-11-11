@@ -1,6 +1,7 @@
 const { parse } = require('../middleware/validate');
 const drivers = require('../services/driver.service');
 const kyc = require('../services/kyc.service');
+const push = require('../services/push.service');
 const orders = require('../services/order.service');
 const pricing = require('../services/pricing.service');
 const restaurants = require('../services/restaurant.service');
@@ -44,13 +45,17 @@ async function updatePricing(req, res) {
 }
 
 async function approveDriver(req, res) {
-  await kyc.approve(parse(v.uuidSchema, req.params.id), req.user.id);
+  const driverId = parse(v.uuidSchema, req.params.id);
+  await kyc.approve(driverId, req.user.id);
+  push.later(() => push.driverReviewed(driverId, true));
   res.json({ dashboard: await buildDashboard() });
 }
 
 async function rejectDriver(req, res) {
   const { reason } = parse(v.rejectSchema, req.body);
-  await kyc.reject(parse(v.uuidSchema, req.params.id), req.user.id, reason);
+  const driverId = parse(v.uuidSchema, req.params.id);
+  await kyc.reject(driverId, req.user.id, reason);
+  push.later(() => push.driverReviewed(driverId, false));
   res.json({ dashboard: await buildDashboard() });
 }
 

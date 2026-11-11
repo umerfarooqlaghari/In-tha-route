@@ -2,6 +2,8 @@ const { z } = require('zod');
 
 const { parse } = require('../middleware/validate');
 const chat = require('../services/chat.service');
+const db = require('../config/db');
+const push = require('../services/push.service');
 const realtime = require('../services/realtime.service');
 const v = require('../validators/app.validator');
 
@@ -62,6 +64,17 @@ async function sendMessage(req, res) {
   const payload = { type: 'message', conversationId, message };
   realtime.sendTo(restaurantUserId, payload);
   realtime.sendTo(driverUserId, payload);
+  // Someone without the app open (no live socket) gets a push notification instead.
+  const recipient = party.role === 'restaurant' ? driverUserId : restaurantUserId;
+  if (recipient && !realtime.isOnline(recipient)) {
+    push.later(async () => {
+      const senderName =
+        party.role === 'restaurant'
+          ? (await db.query('SELECT name FROM restaurants WHERE id = $1', [party.id])).rows[0]?.name || 'Restaurant'
+          : req.user.full_name || 'Your driver';
+      return push.chatMessage(recipient, { senderName, body, conversationId });
+    });
+  }
   res.status(201).json({ message });
 }
 

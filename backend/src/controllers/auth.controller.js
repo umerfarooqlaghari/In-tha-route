@@ -4,6 +4,13 @@ const { toPublicUser } = require('../services/user.service');
 const AppError = require('../utils/AppError');
 const { SIGNUP_SCHEMAS, loginSchema, refreshSchema } = require('../validators/auth.validator');
 const { parse } = require('../middleware/validate');
+const push = require('../services/push.service');
+const { z } = require('zod');
+
+const pushTokenSchema = z.object({
+  token: z.string({ error: 'token is required.' }).trim().refine(push.isValidToken, 'Not an Expo push token.'),
+  platform: z.enum(['ios', 'android', 'unknown']).default('unknown'),
+});
 
 async function signup(req, res) {
   const role = req.body && req.body.role;
@@ -41,4 +48,18 @@ async function me(req, res) {
   res.json({ user: toPublicUser(req.user) });
 }
 
-module.exports = { signup, login, refresh, logout, me };
+/** The app registers this phone for push notifications (after sign-in). */
+async function savePushToken(req, res) {
+  const { token, platform } = parse(pushTokenSchema, req.body);
+  await push.register(req.user.id, token, platform);
+  res.status(204).end();
+}
+
+/** The app stops notifications to this phone (before sign-out). */
+async function removePushToken(req, res) {
+  const { token } = parse(pushTokenSchema.pick({ token: true }), req.body);
+  await push.unregister(req.user.id, token);
+  res.status(204).end();
+}
+
+module.exports = { signup, login, refresh, logout, me, savePushToken, removePushToken };

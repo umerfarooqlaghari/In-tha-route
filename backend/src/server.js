@@ -3,6 +3,9 @@ const { pool } = require('./config/db');
 const { runMigrations } = require('./db/migrate');
 const { seedAdmin } = require('./db/seedAdmin');
 const realtime = require('./services/realtime.service');
+const storage = require('./services/storage.service');
+const ocr = require('./services/ocr.service');
+const geo = require('./services/geo.service');
 
 const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -21,9 +24,31 @@ async function start() {
     console.log(`Server running on http://localhost:${PORT}`);
     console.log(`Environment: ${NODE_ENV}`);
     if (NODE_ENV === 'development') console.log(`Swagger docs: http://localhost:${PORT}/swagger`);
+    console.log(
+      process.env.GEMINI_API_KEY
+        ? `Receipt scanning: Gemini (${ocr.modelChain().map((m) => m.name).join(' → ')}).`
+        : 'Receipt scanning: off (set GEMINI_API_KEY).'
+    );
+    console.log(
+      geo.isGoogleEnabled()
+        ? 'Maps: Google (door-level addresses, road miles, live ETA).'
+        : 'Maps: postcodes only, straight-line miles (set GOOGLE_MAPS_API_KEY for road routing).'
+    );
+    console.log(process.env.PUSH_DISABLED === 'true' ? 'Push notifications: off.' : 'Push notifications: on (Expo).');
+    storage.checkConnection();
   });
   // Live chat and online status share the same port.
   realtime.attach(server);
+
+  // Unanswered offers go to the next driver.
+  const dispatch = require('./services/dispatch.service');
+  setInterval(async () => {
+    try {
+      if ((await dispatch.expireStaleOffers()) > 0) await dispatch.offerOpenOrders();
+    } catch (err) {
+      console.error('Offer sweep failed:', err.message);
+    }
+  }, 30_000).unref();
 }
 
 start().catch((err) => {

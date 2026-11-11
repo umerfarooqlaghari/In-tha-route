@@ -55,28 +55,37 @@ async function listForDrivers(driverIds, client = db) {
 
 /** A driver submits (or replaces) the photo for one of their documents. */
 async function upload({ driverId, userId, documentId, imageBase64, mimeType }) {
-  return db.withTransaction(async (client) => {
-    const { rows } = await client.query(
-      'SELECT * FROM kyc_documents WHERE id = $1 AND driver_id = $2 FOR UPDATE',
-      [documentId, driverId]
-    );
-    const doc = rows[0];
-    if (!doc) throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'Document not found.');
+  let newFileId = null;
+  let replacedFileId = null;
+  try {
+    await db.withTransaction(async (client) => {
+      const { rows } = await client.query(
+        'SELECT * FROM kyc_documents WHERE id = $1 AND driver_id = $2 FOR UPDATE',
+        [documentId, driverId]
+      );
+      const doc = rows[0];
+      if (!doc) throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'Document not found.');
 
-    const fileId = await files.saveImage({ imageBase64, mimeType, ownerUserId: userId }, client);
-    await client.query(
-      `UPDATE kyc_documents SET status = 'pending', file_id = $1, note = NULL, reviewed_by = NULL, updated_at = now()
-        WHERE id = $2`,
-      [fileId, doc.id]
-    );
-    if (doc.file_id) await files.deleteFile(doc.file_id, client);
-    // A rejected application goes back into the review queue once something is re-uploaded.
-    await client.query(
-      `UPDATE driver_profiles SET status = 'pending_kyc', updated_at = now()
-        WHERE id = $1 AND status = 'rejected'`,
-      [driverId]
-    );
-  });
+      newFileId = await files.saveImage({ imageBase64, mimeType, ownerUserId: userId }, client);
+      await client.query(
+        `UPDATE kyc_documents SET status = 'pending', file_id = $1, note = NULL, reviewed_by = NULL, updated_at = now()
+          WHERE id = $2`,
+        [newFileId, doc.id]
+      );
+      replacedFileId = doc.file_id;
+      // A rejected application goes back into the review queue once something is re-uploaded.
+      await client.query(
+        `UPDATE driver_profiles SET status = 'pending_kyc', updated_at = now()
+          WHERE id = $1 AND status = 'rejected'`,
+        [driverId]
+      );
+    });
+  } catch (err) {
+    if (newFileId) await files.discardUnsaved(newFileId, userId, mimeType);
+    throw err;
+  }
+  // The old photo is removed only once nothing points at it any more.
+  if (replacedFileId) await files.deleteFile(replacedFileId);
 }
 
 async function lockPlatformDriver(driverId, client) {
@@ -114,7 +123,7 @@ async function approve(driverId, adminUserId) {
 
 /** Admin rejects a platform driver: submitted documents must be uploaded again. */
 async function reject(driverId, adminUserId, reason) {
-  return db.withTransaction(async (client) => {
+  const oldFileIds = await db.withTransaction(async (client) => {
     await lockPlatformDriver(driverId, client);
     const open = await client.query(
       `SELECT count(*)::int AS n FROM batches WHERE driver_id = $1 AND status IN ('offered', 'accepted')`,
@@ -133,13 +142,14 @@ async function reject(driverId, adminUserId, reason) {
         WHERE driver_id = $1`,
       [driverId, note, adminUserId]
     );
-    for (const r of old.rows) await files.deleteFile(r.file_id, client);
     await client.query(`UPDATE driver_profiles SET status = 'rejected', updated_at = now() WHERE id = $1`, [driverId]);
     await client.query(
       'UPDATE driver_online_sessions SET ended_at = now() WHERE driver_id = $1 AND ended_at IS NULL',
       [driverId]
     );
+    return old.rows.map((r) => r.file_id);
   });
+  for (const id of oldFileIds) await files.deleteFile(id);
 }
 
 /** The stored photo for a document (admin review). */

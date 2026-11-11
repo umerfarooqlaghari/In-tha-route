@@ -16,6 +16,9 @@ const { freshLocation } = require('./driver.service');
  *   accepted -> completed                    (in-house driver: assigned directly)
  */
 const REOFFER_AFTER_MINUTES = 10; // a declined order is not offered to the same driver again this soon
+// An offer nobody answers is withdrawn after this long and goes to another driver.
+const OFFER_TIMEOUT_SECONDS =
+  Number(process.env.OFFER_TIMEOUT_SECONDS) > 0 ? Number(process.env.OFFER_TIMEOUT_SECONDS) : 120;
 
 // How far (straight line) a driver may be from the first pickup of an offer.
 const OFFER_RADIUS_MILES =
@@ -136,17 +139,80 @@ async function offerNextBatch(driverId) {
   });
 }
 
+/**
+ * Offers open orders to online platform drivers who have nothing to do, most recently
+ * located first, and sends each new offer as a push notification. Called when an order
+ * is posted or released, so drivers do not have to keep the app open to get offers.
+ * @returns {Promise<string[]>} ids of the batches offered
+ */
+async function offerOpenOrders(limit = 20) {
+  const push = require('./push.service');
+  const { rows } = await db.query(
+    `SELECT d.id FROM driver_profiles d
+      WHERE d.driver_type = 'platform_contracted' AND d.status = 'approved_online'
+        AND NOT EXISTS (
+              SELECT 1 FROM batches b
+               WHERE b.driver_id = d.id
+                 AND (b.status IN ('offered', 'accepted') OR (b.status = 'completed' AND NOT b.acknowledged)))
+      ORDER BY d.last_location_at DESC NULLS LAST
+      LIMIT $1`,
+    [limit]
+  );
+  const offered = [];
+  for (const { id } of rows) {
+    const batch = await offerNextBatch(id).catch((err) => {
+      console.error('Offer failed:', err.message);
+      return null;
+    });
+    if (batch) {
+      offered.push(batch.id);
+      await push.batchOffered(batch.id);
+    }
+  }
+  return offered;
+}
+
+/**
+ * Withdraws offers that were not answered in time (the driver is treated as having declined),
+ * so the orders can go to someone else. Run every ~30 s by the server.
+ * @returns {Promise<number>} how many offers were withdrawn
+ */
+async function expireStaleOffers() {
+  const { rows } = await db.query(
+    `SELECT b.driver_id FROM batches b
+       JOIN driver_profiles d ON d.id = b.driver_id
+      WHERE b.status = 'offered' AND d.driver_type = 'platform_contracted'
+        AND b.created_at < now() - make_interval(secs => $1)`,
+    [OFFER_TIMEOUT_SECONDS]
+  );
+  let expired = 0;
+  for (const { driver_id: driverId } of rows) {
+    await decline(driverId)
+      .then(() => (expired += 1))
+      .catch((err) => console.error('Expiring an offer failed:', err.message));
+  }
+  return expired;
+}
+
+/** @returns {Promise<string[]>} the accepted orders' ids */
 async function accept(driverId) {
   return db.withTransaction(async (client) => {
     const batch = await openBatch(client, driverId, { lock: true });
     if (!batch || batch.status !== 'offered') {
       throw new AppError(409, 'NO_OFFER', 'This offer is no longer available.');
     }
+    if (Date.now() - new Date(batch.created_at).getTime() > (OFFER_TIMEOUT_SECONDS + 15) * 1000) {
+      throw new AppError(409, 'OFFER_EXPIRED', 'This offer has expired. Look out for the next one.');
+    }
     await client.query(
       `UPDATE batches SET status = 'accepted', accepted_at = now(), active_stop_index = 0 WHERE id = $1`,
       [batch.id]
     );
-    await client.query(`UPDATE orders SET status = 'driver_assigned' WHERE batch_id = $1`, [batch.id]);
+    const { rows } = await client.query(
+      `UPDATE orders SET status = 'driver_assigned' WHERE batch_id = $1 RETURNING id`,
+      [batch.id]
+    );
+    return rows.map((r) => r.id);
   });
 }
 
@@ -183,6 +249,7 @@ async function decline(driverId) {
 /**
  * Completes the current stop ("Picked up" / "Delivered") and moves to the next.
  * Completing the last drop-off completes the batch.
+ * @returns {Promise<{orderId: string, kind: 'picked_up' | 'delivered'}>}
  */
 async function advance(driverId) {
   return db.withTransaction(async (client) => {
@@ -223,6 +290,7 @@ async function advance(driverId) {
     } else {
       await client.query('UPDATE batches SET active_stop_index = $1 WHERE id = $2', [index + 1, batch.id]);
     }
+    return index < n ? { orderId: orders[index].id, kind: 'picked_up' } : { orderId: orders[index - n].id, kind: 'delivered' };
   });
 }
 
@@ -333,6 +401,8 @@ module.exports = {
   currentBatch,
   countOrders,
   offerNextBatch,
+  offerOpenOrders,
+  expireStaleOffers,
   accept,
   decline,
   advance,

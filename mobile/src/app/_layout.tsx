@@ -6,6 +6,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Brand } from '@/constants/brand';
 import { ChatProvider } from '@/context/ChatContext';
 import { InThaRouteProvider } from '@/context/InThaRouteContext';
+// Registers the background location task at start-up (it must exist before any screen mounts).
+import '@/services/driverLocation';
 
 SplashScreen.preventAutoHideAsync();
 

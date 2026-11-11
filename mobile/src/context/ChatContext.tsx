@@ -4,6 +4,8 @@ import { Alert, AppState } from 'react-native';
 import { API_URL } from '@/constants/api';
 import { errorMessage, useInThaRoute } from '@/context/InThaRouteContext';
 import { api, getAccessToken, refreshSession } from '@/services/apiClient';
+import * as Notifications from 'expo-notifications';
+import type { PushData } from '@/services/pushNotifications';
 
 /**
  * Restaurant <-> driver chat.
@@ -90,7 +92,7 @@ function merge(existing: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] 
 }
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
-  const { isLoggedIn, role } = useInThaRoute();
+  const { isLoggedIn, role, setActiveScreen } = useInThaRoute();
   const myRole: ChatRole | null = role === 'restaurant' || role === 'driver' ? role : null;
   const enabled = isLoggedIn && !!myRole;
 
@@ -365,6 +367,23 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   );
 
   const closeConversation = useCallback(() => setOpenConversationId(null), []);
+
+  // Tapping a message notification opens that chat.
+  useEffect(() => {
+    if (!enabled) return;
+    const open = (data?: PushData) => {
+      if (data?.type !== 'chat' || !data.conversationId) return;
+      setActiveScreen('messages');
+      openConversation(data.conversationId);
+    };
+    const sub = Notifications.addNotificationResponseReceivedListener((r) =>
+      open(r.notification.request.content.data as PushData)
+    );
+    Notifications.getLastNotificationResponseAsync()
+      .then((r) => r && open(r.notification.request.content.data as PushData))
+      .catch(() => {});
+    return () => sub.remove();
+  }, [enabled, openConversation, setActiveScreen]);
 
   const deliver = useCallback(
     async (id: string, local: ChatMessage) => {

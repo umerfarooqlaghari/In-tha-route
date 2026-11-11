@@ -3,6 +3,7 @@ const AppError = require('../utils/AppError');
 const { timeAgo } = require('../utils/labels');
 const dispatch = require('./dispatch.service');
 const geo = require('./geo.service');
+const push = require('./push.service');
 const pricing = require('./pricing.service');
 const restaurants = require('./restaurant.service');
 const { shortArea } = require('./driver.service');
@@ -123,12 +124,12 @@ async function listPool(config, currentBatchSize) {
 }
 
 /**
- * Where the drop-off is and how far it is from the restaurant.
- * An unknown postcode is the user's to fix; if the lookup service itself is
+ * Where the drop-off is and how far it is from the restaurant (road miles when Google is
+ * set up). An unknown postcode is the user's to fix; if the lookup service itself is
  * down the order still goes through, priced at the base distance.
  */
-async function locateDropoff(restaurantRow, postcode, config) {
-  const hit = await geo.lookupPostcode(postcode);
+async function locateDropoff(restaurantRow, address, postcode, config) {
+  const hit = await geo.locateAddress(address, postcode);
   if (hit.status === 'not_found') {
     throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed.', [
       { field: 'postcode', message: 'We could not find that postcode. Please check it.' },
@@ -138,7 +139,8 @@ async function locateDropoff(restaurantRow, postcode, config) {
   if (hit.status !== 'ok' || !pickup) {
     return { coords: hit.status === 'ok' ? hit : null, distanceMiles: config.baseDistanceMiles, estimated: true };
   }
-  return { coords: hit, distanceMiles: geo.deliveryMiles(pickup, hit), estimated: false };
+  const { miles } = await geo.deliveryDistance(pickup, hit);
+  return { coords: hit, distanceMiles: miles, estimated: false };
 }
 
 /** A restaurant posts an order (normally from a scanned receipt). */
@@ -159,7 +161,7 @@ async function createOrder(user, input) {
     }
   }
 
-  const dropoff = await locateDropoff(restaurant, input.postcode, config);
+  const dropoff = await locateDropoff(restaurant, input.deliveryAddress, input.postcode, config);
   const fin = pricing.calculateOrderFinancials(config, dropoff.distanceMiles, 1, input.dispatchType);
 
   const orderId = await db.withTransaction(async (client) => {
@@ -201,6 +203,11 @@ async function createOrder(user, input) {
     }
     return rows[0].id;
   });
+
+  // Tell drivers straight away (push), without delaying the restaurant's response.
+  push.later(() =>
+    input.dispatchType === 'own_driver' ? push.ownDriverAssigned(orderId) : dispatch.offerOpenOrders()
+  );
 
   const { rows } = await db.query(`${ORDER_SELECT} WHERE o.id = $1`, [orderId]);
   return toLiveOrder(rows[0], { view: 'restaurant' });

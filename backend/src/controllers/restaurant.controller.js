@@ -62,11 +62,12 @@ async function scanReceipt(req, res) {
   let distanceMiles = 0;
   let dropoffCoords = null;
   if (receipt.postcode) {
-    const hit = await geo.lookupPostcode(receipt.postcode);
+    const hit = await geo.locateAddress(receipt.deliveryAddress, receipt.postcode);
     if (hit.status === 'ok') {
       dropoffCoords = { latitude: hit.latitude, longitude: hit.longitude };
       if (restaurant.latitude != null) {
-        distanceMiles = geo.deliveryMiles({ latitude: restaurant.latitude, longitude: restaurant.longitude }, dropoffCoords);
+        const pickup = { latitude: restaurant.latitude, longitude: restaurant.longitude };
+        distanceMiles = (await geo.deliveryDistance(pickup, dropoffCoords)).miles;
       }
     }
   }

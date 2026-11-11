@@ -66,7 +66,7 @@ export class ApiError extends Error {
 // The hosted API sleeps when idle and can take close to a minute to wake.
 const TIMEOUT_MS = 75_000;
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH';
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 /** One HTTP call to the API. Throws ApiError for network failures and error responses. */
 export async function request<T>(

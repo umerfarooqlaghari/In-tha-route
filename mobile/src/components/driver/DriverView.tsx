@@ -28,6 +28,7 @@ import { showPhone, useChat } from '@/context/ChatContext';
 import { api } from '@/services/apiClient';
 import { errorMessage } from '@/context/InThaRouteContext';
 import { chooseImage } from '@/utils/pickImage';
+import { decodePolyline } from '@/utils/polyline';
 
 const C = Brand.colors;
 
@@ -171,9 +172,14 @@ function DriveScreen() {
     return list;
   }, [stops, stopIndex, navigating, offered, online, driverPos]);
 
+  // The real road route when the server has one; otherwise straight lines between the stops.
+  const encodedRoute = routeEstimate?.polyline;
+  const roadRoute = useMemo(() => (encodedRoute ? decodePolyline(encodedRoute) : null), [encodedRoute]);
   const route: LatLng[] | undefined =
     online && (offered || navigating)
-      ? [driverPos, ...stops.slice(navigating ? stopIndex : 0).map((s) => s.coordinate)]
+      ? roadRoute && roadRoute.length > 1
+        ? roadRoute
+        : [driverPos, ...stops.slice(navigating ? stopIndex : 0).map((s) => s.coordinate)]
       : undefined;
 
   const openNavigation = (c: LatLng) =>
