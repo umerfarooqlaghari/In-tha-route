@@ -11,13 +11,15 @@
     },
     "preview": {
       "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
       "ios": {
         "simulator": false
       }
     },
     "production": {
       "distribution": "store",
-      "credentialsSource": "local",
       "autoIncrement": true,
       "ios": {
         "simulator": false
