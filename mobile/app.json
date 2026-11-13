@@ -43,6 +43,15 @@
       ],
       "expo-secure-store",
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": false,
+            "enableShrinkResourcesInReleaseBuilds": false
+          }
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "cameraPermission": "In Tha Route uses the camera to scan order receipts and photograph driver documents.",
