@@ -447,7 +447,14 @@ function PricingScreen() {
 function DriversScreen() {
   const { drivers, approveDriverKyc, rejectDriverKyc } = useInThaRoute();
   const [busy, setBusy] = useState<string | null>(null);
-  const [photoDoc, setPhotoDoc] = useState<KycDocument | null>(null);
+  // The uploaded photos of one driver, stepped through one at a time.
+  const [viewer, setViewer] = useState<{ docs: KycDocument[]; index: number } | null>(null);
+  const photoDoc = viewer ? viewer.docs[viewer.index] : null;
+  const openPhoto = (d: DriverProfile, doc: KycDocument) => {
+    const docs = d.kycDocuments.filter((k) => k.hasFile);
+    setViewer({ docs, index: Math.max(0, docs.findIndex((k) => k.id === doc.id)) });
+  };
+  const step = (by: number) => setViewer((v) => v && { ...v, index: v.index + by });
 
   const approve = async (d: DriverProfile) => {
     setBusy(`approve-${d.id}`);
@@ -540,7 +547,7 @@ function DriversScreen() {
                     key={doc.id}
                     style={styles.docRow}
                     disabled={!doc.hasFile}
-                    onPress={() => setPhotoDoc(doc)}>
+                    onPress={() => openPhoto(d, doc)}>
                     <Ionicons
                       name={
                         doc.status === 'verified'
@@ -557,7 +564,11 @@ function DriversScreen() {
                     <Text style={styles.docTitle} numberOfLines={1}>
                       {cleanTitle(doc.title)}
                     </Text>
-                    {doc.hasFile && <Ionicons name="image-outline" size={16} color={C.ink3} />}
+                    {doc.hasFile ? (
+                      <Text style={styles.docView}>View</Text>
+                    ) : (
+                      <Text style={styles.muted}>Not uploaded</Text>
+                    )}
                   </Pressable>
                 ))}
 
@@ -606,9 +617,37 @@ function DriversScreen() {
 
       <Sheet
         visible={!!photoDoc}
-        onClose={() => setPhotoDoc(null)}
+        onClose={() => setViewer(null)}
         title={photoDoc ? cleanTitle(photoDoc.title) : ''}>
-        {photoDoc && <DocumentPhoto doc={photoDoc} />}
+        {viewer && photoDoc && (
+          <>
+            <Text style={styles.muted}>Should show: {photoDoc.subtitle}</Text>
+            <DocumentPhoto key={photoDoc.id} doc={photoDoc} />
+            {viewer.docs.length > 1 && (
+              <View style={styles.actionRow}>
+                <Button
+                  label="Previous"
+                  variant="secondary"
+                  icon="chevron-back"
+                  disabled={viewer.index === 0}
+                  onPress={() => step(-1)}
+                  style={styles.flex1}
+                />
+                <Text style={styles.viewerCount}>
+                  {viewer.index + 1} of {viewer.docs.length}
+                </Text>
+                <Button
+                  label="Next"
+                  variant="secondary"
+                  icon="chevron-forward"
+                  disabled={viewer.index === viewer.docs.length - 1}
+                  onPress={() => step(1)}
+                  style={styles.flex1}
+                />
+              </View>
+            )}
+          </>
+        )}
       </Sheet>
     </Screen>
   );
@@ -756,6 +795,8 @@ const styles = StyleSheet.create({
   progressFill: { height: 4, borderRadius: 2 },
   docRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 2 },
   docTitle: { ...Brand.type.caption, color: C.ink, flex: 1 },
+  docView: { ...Brand.type.captionStrong, color: C.primary },
+  viewerCount: { ...Brand.type.captionStrong, color: C.ink2, alignSelf: 'center' },
 
   inlineStats: { flexDirection: 'row', gap: 16, paddingLeft: 2 },
 });
