@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LiveMap, MapPin } from '@/components/LiveMap';
+import { ReceiptSheet } from '@/components/ReceiptSheet';
 import {
   Avatar,
   Badge,
@@ -55,6 +56,7 @@ export function AdminView() {
 
 function OverviewScreen() {
   const { orders, restaurants, totals, drivers, cancelOrder, releaseOrder } = useInThaRoute();
+  const [receiptOrder, setReceiptOrder] = useState<LiveOrder | null>(null);
   // Online drivers whose app has sent a recent GPS position.
   const liveDrivers = drivers.filter((d) => d.isOnline && d.location);
   const active = orders.filter((o) => o.status !== 'delivered' && o.status !== 'cancelled');
@@ -146,12 +148,13 @@ function OverviewScreen() {
                     <Text style={styles.profit}>+{formatGbp(margin)}</Text>
                   )}
                 </View>
-                <OrderControls order={o} onCancel={cancelOrder} onRelease={releaseOrder} />
+                <OrderControls order={o} onCancel={cancelOrder} onRelease={releaseOrder} onReceipt={setReceiptOrder} />
               </View>
             );
           })
         )}
       </Card>
+      <ReceiptSheet order={receiptOrder} as="admin" onClose={() => setReceiptOrder(null)} />
     </Screen>
   );
 }
@@ -171,10 +174,12 @@ function OrderControls({
   order: o,
   onCancel,
   onRelease,
+  onReceipt,
 }: {
   order: LiveOrder;
   onCancel: (id: string) => Promise<boolean>;
   onRelease: (id: string) => Promise<boolean>;
+  onReceipt: (order: LiveOrder) => void;
 }) {
   const withDriver = !!o.batchId && (o.status === 'batched_offered' || o.status === 'driver_assigned');
   // The admin can cancel until delivery, even after the driver has collected the food.
@@ -214,8 +219,18 @@ function OrderControls({
           </Text>
         </View>
       )}
-      {(withDriver || cancellable) && (
+      {(withDriver || cancellable || o.hasReceipt) && (
         <View style={styles.controlRow}>
+          {o.hasReceipt && (
+            <Button
+              label="Receipt"
+              icon="receipt-outline"
+              compact
+              variant="secondary"
+              style={styles.controlButton}
+              onPress={() => onReceipt(o)}
+            />
+          )}
           {withDriver && (
             <Button
               label="Move driver"

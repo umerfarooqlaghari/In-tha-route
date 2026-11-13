@@ -34,6 +34,7 @@ export function AuthLayout({
           },
         ]}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}>
         <View style={styles.brandRow}>
           <View style={styles.logo}>

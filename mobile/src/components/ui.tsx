@@ -1,9 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
+  LayoutChangeEvent,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Platform,
   Pressable,
   ScrollView,
   StyleProp,
@@ -22,9 +27,95 @@ type IconName = keyof typeof Ionicons.glyphMap;
 const C = Brand.colors;
 
 /* -------------------------------------------------------------------------- */
+/* Keyboard                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** Lets a field ask the scroll view it sits in to bring it into view when it takes focus. */
+const RevealFieldContext = createContext<() => void>(() => {});
+
+/**
+ * Keeps the field being typed in visible inside a scroll view.
+ * `reveal(covered)` scrolls just enough to bring the focused field into view;
+ * `covered` is how much of the bottom of the scroll view the keyboard hides.
+ */
+function useRevealFocusedField() {
+  const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const viewport = useRef(0);
+  const offset = useRef(0);
+
+  const reveal = useCallback((covered = 0) => {
+    const input = TextInput.State.currentlyFocusedInput();
+    const content = scroll.current?.getInnerViewRef();
+    if (!input || !content) return;
+    input.measureLayout(
+      content,
+      (_x, y, _width, height) => {
+        const visible = viewport.current - covered;
+        if (visible <= 0) return;
+        const top = y - 28; // keeps the label above the field in view
+        const bottom = y + height + 16;
+        if (bottom > offset.current + visible) {
+          scroll.current?.scrollTo({ y: bottom - visible, animated: true });
+        } else if (top < offset.current) {
+          scroll.current?.scrollTo({ y: Math.max(top, 0), animated: true });
+        }
+      },
+      () => {}, // the focused field is not inside this scroll view
+    );
+  }, []);
+
+  const onViewport = useCallback((e: LayoutChangeEvent) => {
+    viewport.current = e.nativeEvent.layout.height;
+  }, []);
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    offset.current = e.nativeEvent.contentOffset.y;
+  }, []);
+
+  // How much of the scroll view the keyboard covers right now (set by the owner).
+  const covered = useRef(0);
+  // Waits for the keyboard and the layout to settle: scrolling earlier is clamped to the old size.
+  const revealSoon = useCallback(() => {
+    setTimeout(() => reveal(covered.current), 120);
+  }, [reveal]);
+
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', revealSoon);
+    return () => shown.remove();
+  }, [revealSoon]);
+
+  const setCovered = useCallback((height: number) => {
+    covered.current = height;
+  }, []);
+
+  return { scroll, reveal, revealSoon, setCovered, onViewport, onScroll };
+}
+
+/**
+ * Height of the open keyboard on Android, 0 otherwise. Android draws edge to edge and no longer
+ * resizes the window for the keyboard, so a screen has to make room itself. iOS does it natively.
+ */
+function useAndroidKeyboardHeight() {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return height;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Layout                                                                      */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * A scrolling page. Tapping an empty spot or dragging the page puts the keyboard away,
+ * and the field being typed in is scrolled clear of the keyboard.
+ */
 export function Screen({
   children,
   contentStyle,
@@ -33,20 +124,41 @@ export function Screen({
   contentStyle?: StyleProp<ViewStyle>;
 }) {
   const insets = useSafeAreaInsets();
+  const { scroll, revealSoon, setCovered, onViewport, onScroll } = useRevealFocusedField();
+  const keyboard = useAndroidKeyboardHeight();
+
+  // Android: once the room for the keyboard is in place, bring the focused field above it.
+  // iOS moves the focused field itself (automaticallyAdjustKeyboardInsets).
+  useEffect(() => {
+    setCovered(keyboard > 0 ? keyboard + insets.bottom : 0);
+    if (keyboard > 0) revealSoon();
+  }, [keyboard, insets.bottom, setCovered, revealSoon]);
+  const onFieldFocus = Platform.OS === 'android' ? revealSoon : noop;
+
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={[
-        styles.screenContent,
-        { paddingBottom: insets.bottom + 32 },
-        contentStyle,
-      ]}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}>
-      {children}
-    </ScrollView>
+    <RevealFieldContext.Provider value={onFieldFocus}>
+      <ScrollView
+        ref={scroll}
+        style={styles.screen}
+        contentContainerStyle={[
+          styles.screenContent,
+          { paddingBottom: insets.bottom + 32 + keyboard },
+          contentStyle,
+        ]}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
+        onLayout={onViewport}
+        onScroll={onScroll}
+        scrollEventThrottle={32}
+        showsVerticalScrollIndicator={false}>
+        {children}
+      </ScrollView>
+    </RevealFieldContext.Provider>
   );
 }
+
+function noop() {}
 
 export function Card({
   children,
@@ -463,13 +575,22 @@ export function Field({
   error,
   ...props
 }: TextInputProps & { label: string; error?: string }) {
+  const revealField = useContext(RevealFieldContext);
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
         placeholderTextColor={C.ink3}
-        style={[styles.fieldInput, !!error && styles.fieldInputError]}
+        style={[
+          styles.fieldInput,
+          props.multiline && styles.fieldInputMultiline,
+          !!error && styles.fieldInputError,
+        ]}
         {...props}
+        onFocus={(e) => {
+          revealField();
+          props.onFocus?.(e);
+        }}
       />
       {!!error && <Text style={styles.fieldError}>{error}</Text>}
     </View>
@@ -492,21 +613,41 @@ export function Sheet({
   children: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  const { scroll, revealSoon, onViewport, onScroll } = useRevealFocusedField();
+
+  // With the keyboard open, a tap outside the sheet puts the keyboard away first.
+  const tapOutside = () => (Keyboard.isVisible() ? Keyboard.dismiss() : onClose());
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.sheetRoot}
-        behavior="padding">
-        <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
-          <View style={styles.sheetHandle} />
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle} numberOfLines={1}>
-              {title}
-            </Text>
-            <IconButton icon="close" onPress={onClose} size={34} />
-          </View>
-          {children}
+      {/* The keyboard pushes the sheet up and shortens it; what no longer fits scrolls. */}
+      <KeyboardAvoidingView style={styles.sheetRoot} behavior="padding">
+        <Pressable style={styles.sheetBackdrop} onPress={tapOutside} accessibilityLabel="Close" />
+        <View style={styles.sheet}>
+          <Pressable style={styles.sheetTop} onPress={Keyboard.dismiss} accessible={false}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle} numberOfLines={1}>
+                {title}
+              </Text>
+              <IconButton icon="close" label="Close" onPress={onClose} size={34} />
+            </View>
+          </Pressable>
+          <ScrollView
+            ref={scroll}
+            style={styles.sheetScroll}
+            contentContainerStyle={[styles.sheetContent, { paddingBottom: insets.bottom + 16 }]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            alwaysBounceVertical={false}
+            onLayout={(e) => {
+              onViewport(e);
+              revealSoon();
+            }}
+            onScroll={onScroll}
+            scrollEventThrottle={32}>
+            <RevealFieldContext.Provider value={revealSoon}>{children}</RevealFieldContext.Provider>
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -647,6 +788,14 @@ const styles = StyleSheet.create({
     ...Brand.type.body,
     color: C.ink,
   },
+  fieldInputMultiline: {
+    height: undefined,
+    minHeight: 50,
+    maxHeight: 132,
+    paddingTop: 14,
+    paddingBottom: 14,
+    textAlignVertical: 'top',
+  },
 
   sheetRoot: { flex: 1, justifyContent: 'flex-end' },
   sheetBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: C.overlay },
@@ -654,11 +803,18 @@ const styles = StyleSheet.create({
     backgroundColor: C.surface,
     borderTopLeftRadius: Brand.radius.xl,
     borderTopRightRadius: Brand.radius.xl,
+    maxHeight: '88%',
+    flexShrink: 1,
+    overflow: 'hidden',
+  },
+  sheetTop: {
     paddingHorizontal: 20,
     paddingTop: 8,
+    paddingBottom: 16,
     gap: 16,
-    maxHeight: '88%',
   },
+  sheetScroll: { flexGrow: 0 },
+  sheetContent: { paddingHorizontal: 20, gap: 16 },
   sheetHandle: {
     alignSelf: 'center',
     width: 36,

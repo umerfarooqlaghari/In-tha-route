@@ -53,6 +53,8 @@ export interface ReceiptTemplate {
   items: OrderItem[];
   /** What the restaurant will be charged for a platform driver. */
   estimatedFeeGbp: number;
+  /** The scanned photo, kept on the server and attached to the order when it is posted. */
+  receiptFileId?: string;
   pickupCoords?: LatLng | null;
   dropoffCoords?: LatLng | null;
   mapCoords: {
@@ -111,6 +113,8 @@ export interface LiveOrder {
   nextPayoutGbp?: number;
   /** Restaurant and admin: nobody has taken it yet, or the delivery is running late. */
   attention?: 'no_driver' | 'late_delivery';
+  /** The photo of the scanned receipt was kept and can be opened (a driver: only for orders in their run). */
+  hasReceipt?: boolean;
   createdAtLabel: string;
   pickupCoords?: LatLng | null;
   dropoffCoords?: LatLng | null;
@@ -374,6 +378,8 @@ interface InThaRouteContextType {
     customAddress?: string;
     customPostcode?: string;
     customAccessCode?: string;
+    /** The note for the driver, as the restaurant left it after checking the scan. */
+    customNote?: string;
   }) => Promise<LiveOrder | null>;
   markOrderReady: (orderId: string) => Promise<boolean>;
   /** Restaurant or admin: cancel an order the driver has not collected yet. */
@@ -691,6 +697,7 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
     customAddress,
     customPostcode,
     customAccessCode,
+    customNote,
   }) => {
     try {
       const res = await call<{ order: LiveOrder; dashboard: Dashboard }>('POST', '/api/restaurant/orders', {
@@ -702,12 +709,13 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         directCustomerPhone: template.directCustomerPhone ?? '',
         deliveryAddress: customAddress || template.deliveryAddress,
         postcode: customPostcode || template.postcode,
-        deliveryInstructions: template.deliveryInstructions,
+        deliveryInstructions: (customNote ?? template.deliveryInstructions ?? '').trim(),
         orderTotalGbp: template.orderTotalGbp,
         items: template.items.filter((i) => i.name && i.quantity > 0),
         prepMinutes,
         dispatchType,
         ...(dispatchType === 'own_driver' && { ownDriverId }),
+        ...(template.receiptFileId && { receiptFileId: template.receiptFileId }),
       });
       return res.order;
     } catch (err) {

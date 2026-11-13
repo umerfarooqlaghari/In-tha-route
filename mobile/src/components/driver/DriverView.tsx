@@ -4,6 +4,7 @@ import { ActivityIndicator, Animated, Linking, Platform, Pressable, StyleSheet, 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LiveMap, MapPin } from '@/components/LiveMap';
+import { ReceiptSheet } from '@/components/ReceiptSheet';
 import {
   Badge,
   Button,
@@ -135,6 +136,7 @@ function DriveScreen() {
   const { busy, run } = useBusy();
   const { openForOrder } = useChat();
   const [sheetHeight, setSheetHeight] = useState(320);
+  const [receiptOrder, setReceiptOrder] = useState<LiveOrder | null>(null);
   const toggleOnline = () => run('online', () => setOnline(!online));
 
   const navigating = driverBatchStatus === 'accepted_navigating' && batch.length > 0;
@@ -330,6 +332,17 @@ function DriveScreen() {
               </View>
             ) : null}
 
+            {/* What the customer or the restaurant asked for, read from the receipt. */}
+            {current.order.deliveryInstructions ? (
+              <View style={styles.noteRow} testID="driver-order-note">
+                <Ionicons name="document-text-outline" size={16} color={C.warning} />
+                <Text style={styles.noteText} numberOfLines={4}>
+                  <Text style={styles.noteLabel}>Note: </Text>
+                  {current.order.deliveryInstructions}
+                </Text>
+              </View>
+            ) : null}
+
             <View style={styles.actions}>
               <IconButton
                 icon="call-outline"
@@ -344,6 +357,14 @@ function DriveScreen() {
               />
               <IconButton icon="chatbubble-outline" onPress={() => openForOrder(current.order.id)} />
               <IconButton icon="navigate-outline" onPress={() => openNavigation(current.coordinate)} />
+              {current.order.hasReceipt && (
+                <IconButton
+                  icon="receipt-outline"
+                  label="Receipt"
+                  testID="driver-order-receipt"
+                  onPress={() => setReceiptOrder(current.order)}
+                />
+              )}
               <Button
                 label={current.type === 'pickup' ? 'Picked up' : 'Delivered'}
                 variant={current.type === 'pickup' ? 'dark' : 'success'}
@@ -395,6 +416,8 @@ function DriveScreen() {
           </View>
         )}
       </View>
+
+      <ReceiptSheet order={receiptOrder} as="driver" onClose={() => setReceiptOrder(null)} />
     </View>
   );
 }
@@ -1059,6 +1082,16 @@ const styles = StyleSheet.create({
     backgroundColor: C.surfaceAlt,
   },
   infoText: { ...Brand.type.captionStrong, color: C.ink, flex: 1 },
+  noteRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 12,
+    borderRadius: Brand.radius.md,
+    backgroundColor: C.warningSoft,
+  },
+  noteText: { ...Brand.type.caption, color: C.ink, flex: 1 },
+  noteLabel: { ...Brand.type.captionStrong, color: C.ink },
   successIcon: {
     width: 56,
     height: 56,

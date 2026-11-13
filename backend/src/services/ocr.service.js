@@ -52,13 +52,16 @@ Extract the fields below exactly as printed. Use an empty string when a field is
 - directCustomerPhone: a personal mobile number the customer wrote inside the address or notes, if any.
 - deliveryAddress: flat / house number, street and town, written once, without the postcode.
 - postcode: the UK delivery postcode.
-- deliveryInstructions: delivery notes for the driver (door, intercom, cutlery and similar).
+- deliveryInstructions: every note on the receipt, word for word: the customer's note, delivery
+  instructions, order comments or allergy notes (lines such as "Note:", "Customer note", "Instructions",
+  "Comments", "Special requests"), and a note that staff wrote on the receipt by hand if it is clearly
+  legible. Join several notes with " | ". Empty when the receipt has no note.
 - suggestedPrepMinutes: minutes from a "Prepare by ... (40min)" line, otherwise 0.
 - targetDeliveryTime: the delivery or due time printed, as HH:MM, otherwise "".
 - orderTotalGbp: the order total in pounds as a number.
 - items: every line item with quantity, name and line price in pounds.
 
-Ignore handwriting on the receipt. Do not guess values that are not printed.`;
+Apart from that note, ignore handwriting on the receipt. Do not guess values that are not printed.`;
 
 const RESPONSE_SCHEMA = {
   type: 'OBJECT',

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LiveMap, MapPin } from '@/components/LiveMap';
+import { ReceiptSheet } from '@/components/ReceiptSheet';
 import {
   Avatar,
   Badge,
@@ -97,6 +98,7 @@ function NewOrderScreen() {
   const [address, setAddress] = useState('');
   const [postcode, setPostcode] = useState('');
   const [accessCode, setAccessCode] = useState('');
+  const [note, setNote] = useState('');
   const [showItems, setShowItems] = useState(false);
   const [prep, setPrep] = useState(20);
   const [dispatch, setDispatch] = useState<'open_platform' | 'own_driver'>(
@@ -119,6 +121,7 @@ function NewOrderScreen() {
     setAddress(draft.deliveryAddress);
     setPostcode(draft.postcode);
     setAccessCode(draft.phoneAccessCode ?? '');
+    setNote(draft.deliveryInstructions ?? '');
     setPrep(PREP_OPTIONS.reduce((a, b) =>
       Math.abs(b - draft.suggestedPrepMinutes) < Math.abs(a - draft.suggestedPrepMinutes) ? b : a
     ));
@@ -137,6 +140,7 @@ function NewOrderScreen() {
       customAddress: address.trim(),
       customPostcode: postcode.trim(),
       customAccessCode: accessCode.trim(),
+      customNote: note.trim(),
     });
     setPosting(false);
     if (!order) return;
@@ -277,6 +281,16 @@ function NewOrderScreen() {
                 <Field label="Access code" value={accessCode} onChangeText={setAccessCode} />
               </View>
             </View>
+            {/* Read from the receipt; the restaurant can correct it or add its own. The driver sees it. */}
+            <Field
+              label="Note for the driver"
+              value={note}
+              onChangeText={setNote}
+              placeholder="No note on this receipt"
+              multiline
+              maxLength={1000}
+              testID="order-note"
+            />
           </Card>
 
           <Card onPress={() => setShowItems((v) => !v)}>
@@ -482,6 +496,7 @@ function orderPins(orders: LiveOrder[]): MapPin[] {
 function LiveOrdersScreen() {
   const { orders, markOrderReady, cancelOrder, setActiveScreen, restaurants, activeRestaurantId } = useInThaRoute();
   const { openForOrder } = useChat();
+  const [receiptOrder, setReceiptOrder] = useState<LiveOrder | null>(null);
   const restaurant = restaurants.find((r) => r.id === activeRestaurantId);
   const active = useMemo(
     () =>
@@ -556,6 +571,16 @@ function LiveOrdersScreen() {
                 </Text>
               </View>
 
+              {o.deliveryInstructions ? (
+                <View style={styles.note}>
+                  <Ionicons name="document-text-outline" size={16} color={C.warning} />
+                  <Text style={styles.noteText} numberOfLines={3}>
+                    <Text style={styles.noteLabel}>Note: </Text>
+                    {o.deliveryInstructions}
+                  </Text>
+                </View>
+              ) : null}
+
               {o.attention && (
                 <View style={styles.attention}>
                   <Ionicons name="alert-circle" size={16} color={C.primary} />
@@ -582,8 +607,18 @@ function LiveOrdersScreen() {
               </View>
 
               {/* Equal-width actions, so the row looks the same whichever ones apply. */}
-              {(showChat || !isReady) && (
+              {(showChat || !isReady || o.hasReceipt) && (
                 <View style={styles.orderActions}>
+                  {o.hasReceipt && (
+                    <Button
+                      label="Receipt"
+                      icon="receipt-outline"
+                      compact
+                      variant="secondary"
+                      style={styles.orderAction}
+                      onPress={() => setReceiptOrder(o)}
+                    />
+                  )}
                   {showChat && (
                     <Button
                       label="Chat"
@@ -619,6 +654,7 @@ function LiveOrdersScreen() {
           );
         })
       )}
+      <ReceiptSheet order={receiptOrder} as="restaurant" onClose={() => setReceiptOrder(null)} />
     </Screen>
   );
 }
@@ -865,6 +901,16 @@ const styles = StyleSheet.create({
     backgroundColor: C.primarySoft,
   },
   attentionText: { ...Brand.type.caption, color: C.ink, flex: 1 },
+  note: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: C.warningSoft,
+  },
+  noteText: { ...Brand.type.caption, color: C.ink, flex: 1 },
+  noteLabel: { ...Brand.type.captionStrong, color: C.ink },
   statusLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   driverLine: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1, minWidth: 0 },
   driverName: { ...Brand.type.captionStrong, color: C.ink2, flexShrink: 1 },

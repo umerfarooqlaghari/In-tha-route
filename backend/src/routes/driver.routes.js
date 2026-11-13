@@ -23,5 +23,6 @@ router.post('/batch/decline', approved, h(c.declineBatch));
 router.post('/batch/advance', approved, h(c.advanceStop)); // "Picked up" / "Delivered"
 router.post('/batch/next', approved, h(c.nextBatch)); // "Find new orders" / "Refresh"
 router.post('/pool/:id/add', approved, h(c.addPoolOrder)); // add a pool order to my route
+router.get('/orders/:id/receipt', approved, h(c.orderReceipt)); // receipt photo of an order in my run
 
 module.exports = router;

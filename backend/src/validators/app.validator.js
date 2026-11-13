@@ -49,6 +49,8 @@ const createOrderSchema = z
       .max(180, 'Preparation time is too long.'),
     dispatchType: z.enum(['open_platform', 'own_driver'], { error: 'Choose who delivers this order.' }),
     ownDriverId: z.uuid('Choose one of your drivers.').optional(),
+    // The photo saved by the scan this order came from.
+    receiptFileId: z.uuid().optional().catch(undefined),
   })
   .refine((o) => o.dispatchType !== 'own_driver' || o.ownDriverId, {
     path: ['ownDriverId'],

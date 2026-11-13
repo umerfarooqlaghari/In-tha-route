@@ -4,7 +4,7 @@ const AppError = require('../utils/AppError');
 const storage = require('./storage.service');
 
 /**
- * Uploaded images (KYC document photos).
+ * Uploaded images (KYC document photos and scanned receipts).
  * With S3 configured (S3_BUCKET) the bytes go to the bucket and the `files` row keeps
  * only the object key; without it they are stored in the database as before.
  * Rows stored either way keep working, so switching on S3 needs no data move.
@@ -44,9 +44,9 @@ async function saveImage({ imageBase64, mimeType, ownerUserId, folder = 'kyc' },
 
   if (!storage.isEnabled()) {
     await client.query(
-      `INSERT INTO files (id, owner_user_id, mime_type, size_bytes, storage, data)
-       VALUES ($1, $2, $3, $4, 'db', $5)`,
-      [id, ownerUserId, mimeType, data.length, data]
+      `INSERT INTO files (id, owner_user_id, mime_type, size_bytes, storage, data, folder)
+       VALUES ($1, $2, $3, $4, 'db', $5, $6)`,
+      [id, ownerUserId, mimeType, data.length, data, folder]
     );
     return id;
   }
@@ -55,9 +55,9 @@ async function saveImage({ imageBase64, mimeType, ownerUserId, folder = 'kyc' },
   await storage.put(key, data, mimeType);
   try {
     await client.query(
-      `INSERT INTO files (id, owner_user_id, mime_type, size_bytes, storage, object_key)
-       VALUES ($1, $2, $3, $4, 's3', $5)`,
-      [id, ownerUserId, mimeType, data.length, key]
+      `INSERT INTO files (id, owner_user_id, mime_type, size_bytes, storage, object_key, folder)
+       VALUES ($1, $2, $3, $4, 's3', $5, $6)`,
+      [id, ownerUserId, mimeType, data.length, key, folder]
     );
   } catch (err) {
     await storage.remove(key).catch(() => {});
@@ -99,4 +99,35 @@ async function discardUnsaved(id, ownerUserId, mimeType, folder = 'kyc') {
   await storage.remove(objectKey(folder, ownerUserId, id, mimeType)).catch(() => {});
 }
 
-module.exports = { decodeImage, saveImage, getFile, deleteFile, discardUnsaved, MAX_BYTES };
+// A scanned receipt that was never posted as an order is kept this long, then removed.
+const UNPOSTED_RECEIPT_HOURS = 24;
+
+/** Removes receipt photos from scans that never became an order. Returns how many went. */
+async function deleteUnpostedReceipts(olderThanHours = UNPOSTED_RECEIPT_HOURS) {
+  const { rows } = await db.query(
+    `DELETE FROM files f
+      WHERE f.folder = 'receipts'
+        AND f.created_at < now() - make_interval(hours => $1)
+        AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.receipt_file_id = f.id)
+      RETURNING f.storage, f.object_key`,
+    [olderThanHours]
+  );
+  for (const row of rows) {
+    if (row.storage !== 's3') continue;
+    await storage.remove(row.object_key).catch((err) => {
+      console.error(`Could not delete S3 object ${row.object_key}: ${err.message}`);
+    });
+  }
+  return rows.length;
+}
+
+module.exports = {
+  decodeImage,
+  saveImage,
+  getFile,
+  deleteFile,
+  discardUnsaved,
+  deleteUnpostedReceipts,
+  MAX_BYTES,
+  UNPOSTED_RECEIPT_HOURS,
+};

@@ -79,6 +79,15 @@ async function releaseOrder(req, res) {
   res.json({ dashboard: await buildDashboard() });
 }
 
+/** The receipt photo an order was scanned from. */
+async function orderReceipt(req, res) {
+  const file = await orders.getReceiptFile(parse(v.uuidSchema, req.params.id), { anyRestaurant: true });
+  if (!file) throw new AppError(404, 'FILE_NOT_FOUND', 'No receipt photo was saved for this order.');
+  res.set('Content-Type', file.mime_type);
+  res.set('Cache-Control', 'private, no-store');
+  res.send(file.data);
+}
+
 /** The photo a driver uploaded for one document. */
 async function documentFile(req, res) {
   const file = await kyc.getDocumentFile(parse(v.uuidSchema, req.params.id));
@@ -96,5 +105,6 @@ module.exports = {
   updateRestaurantPolicy,
   cancelOrder,
   releaseOrder,
+  orderReceipt,
   documentFile,
 };

@@ -17,6 +17,7 @@ router.post('/drivers/:id/reject', h(c.rejectDriver));
 router.patch('/restaurants/:id/policy', h(c.updateRestaurantPolicy));
 router.post('/orders/:id/cancel', h(c.cancelOrder)); // any order not delivered yet
 router.post('/orders/:id/release', h(c.releaseOrder)); // take off the driver, back to the pool
+router.get('/orders/:id/receipt', h(c.orderReceipt)); // the scanned receipt photo
 router.get('/kyc-documents/:id/file', h(c.documentFile)); // uploaded photo
 
 module.exports = router;

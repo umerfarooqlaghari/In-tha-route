@@ -55,6 +55,13 @@ async function start() {
       console.error('Order alerts failed:', err.message);
     }
   }, 30_000).unref();
+
+  // Receipt photos from scans that were never posted are removed after a day.
+  const files = require('./services/file.service');
+  const clearUnpostedReceipts = () =>
+    files.deleteUnpostedReceipts().catch((err) => console.error('Receipt clean-up failed:', err.message));
+  clearUnpostedReceipts();
+  setInterval(clearUnpostedReceipts, 60 * 60 * 1000).unref();
 }
 
 start().catch((err) => {

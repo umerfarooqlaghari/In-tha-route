@@ -7,7 +7,7 @@ process.env.JWT_SECRET = 'test-secret-test-secret-test-secret-1234';
 process.env.BCRYPT_ROUNDS = '4';
 process.env.GOOGLE_MAPS_API_KEY = 'test-google-key';
 delete process.env.PUSH_DISABLED;
-delete process.env.S3_BUCKET;
+process.env.S3_BUCKET = ''; // empty, so the bucket in .env is not picked up: tests never touch the real one
 
 const { startTestDatabase } = require('./helpers/testDb');
 

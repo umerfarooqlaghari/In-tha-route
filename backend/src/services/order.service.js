@@ -2,6 +2,7 @@ const db = require('../config/db');
 const AppError = require('../utils/AppError');
 const { timeAgo } = require('../utils/labels');
 const dispatch = require('./dispatch.service');
+const files = require('./file.service');
 const geo = require('./geo.service');
 const push = require('./push.service');
 const pricing = require('./pricing.service');
@@ -93,6 +94,8 @@ function toLiveOrder(row, { view, now = new Date(), maskDelivered = false, nextP
     platformMarginGbp: view === 'admin' ? pricing.round2(fee - payout) : 0,
     nextPayoutGbp,
     attention: view === 'restaurant' || view === 'admin' ? attentionOf(row, now) : undefined,
+    // The scanned receipt photo. A driver gets it for the orders in their run, never in the pool.
+    hasReceipt: pool ? undefined : Boolean(row.receipt_file_id),
     createdAtLabel: timeAgo(row.created_at, now),
     pickupCoords: coordsOf(row.pickup_latitude, row.pickup_longitude),
     dropoffCoords: coordsOf(row.dropoff_latitude, row.dropoff_longitude),
@@ -206,6 +209,51 @@ async function rejectDuplicate(client, restaurantId, input) {
   }
 }
 
+/**
+ * The receipt photo to keep with a new order: it must be this user's own scan and not
+ * already on another order. Anything else is ignored, the order is still posted.
+ */
+async function claimReceiptPhoto(client, userId, fileId) {
+  if (!fileId) return null;
+  // Lock the photo first, then look: two posts at once take turns, and the second sees the first.
+  const file = await client.query(
+    `SELECT id FROM files WHERE id = $1 AND owner_user_id = $2 AND folder = 'receipts' FOR UPDATE`,
+    [fileId, userId]
+  );
+  if (!file.rows[0]) return null;
+  const used = await client.query('SELECT 1 FROM orders WHERE receipt_file_id = $1', [fileId]);
+  return used.rows[0] ? null : fileId;
+}
+
+/** The receipt photo of one order, or null. A restaurant only gets its own orders'. */
+async function getReceiptFile(orderId, { restaurantId, anyRestaurant = false } = {}) {
+  if (!anyRestaurant && !restaurantId) return null;
+  const { rows } = await db.query(
+    `SELECT receipt_file_id FROM orders WHERE id = $1 AND ($2::uuid IS NULL OR restaurant_id = $2)`,
+    [orderId, anyRestaurant ? null : restaurantId]
+  );
+  if (!rows[0] || !rows[0].receipt_file_id) return null;
+  return files.getFile(rows[0].receipt_file_id);
+}
+
+/**
+ * The receipt photo for a driver: only while the order is in their current run (offered,
+ * accepted, or just finished and still on their screen). Past deliveries and pool orders are not.
+ */
+async function getReceiptFileForDriver(orderId, driverId) {
+  if (!driverId) return null;
+  const { rows } = await db.query(
+    `SELECT o.receipt_file_id
+       FROM orders o
+       JOIN batches b ON b.id = o.batch_id
+      WHERE o.id = $1 AND b.driver_id = $2 AND o.status <> 'cancelled'
+        AND (b.status IN ('offered', 'accepted') OR (b.status = 'completed' AND NOT b.acknowledged))`,
+    [orderId, driverId]
+  );
+  if (!rows[0] || !rows[0].receipt_file_id) return null;
+  return files.getFile(rows[0].receipt_file_id);
+}
+
 /** A restaurant posts an order (normally from a scanned receipt). */
 async function createOrder(user, input) {
   const config = await pricing.getConfig();
@@ -245,14 +293,15 @@ async function createOrder(user, input) {
       ]);
       await rejectDuplicate(client, restaurant.id, input);
     }
+    const receiptFileId = await claimReceiptPhoto(client, user.id, input.receiptFileId);
     const { rows } = await client.query(
       `INSERT INTO orders (
          restaurant_id, source, external_order_id, customer_name, customer_phone, phone_access_code,
          direct_customer_phone, delivery_address, postcode, delivery_instructions, restaurant_pickup_note,
          distance_miles, dropoff_latitude, dropoff_longitude, prep_minutes, ready_at, order_total_gbp,
-         items, dispatch_type, status, restaurant_fee_gbp, driver_payout_gbp, created_by)
+         items, dispatch_type, status, restaurant_fee_gbp, driver_payout_gbp, created_by, receipt_file_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-               now() + make_interval(mins => $15), $16, $17, $18, 'preparing', $19, $20, $21)
+               now() + make_interval(mins => $15), $16, $17, $18, 'preparing', $19, $20, $21, $22)
        RETURNING id`,
       [
         restaurant.id,
@@ -276,6 +325,7 @@ async function createOrder(user, input) {
         fin.restaurantFeeGbp,
         fin.driverPayoutGbp,
         user.id,
+        receiptFileId,
       ]
     );
     if (input.dispatchType === 'own_driver') {
@@ -368,5 +418,7 @@ module.exports = {
   listPool,
   locateDropoff,
   createOrder,
+  getReceiptFile,
+  getReceiptFileForDriver,
   markReady,
 };

@@ -8,6 +8,7 @@ const orders = require('../services/order.service');
 const pricing = require('../services/pricing.service');
 const push = require('../services/push.service');
 const v = require('../validators/app.validator');
+const AppError = require('../utils/AppError');
 
 /** A driver sees what they are paid, never what restaurants are charged. */
 const driverPricing = (config) => ({
@@ -184,6 +185,15 @@ async function addPoolOrder(req, res) {
   res.json({ ...result, dashboard: await buildDashboard(req.user) });
 }
 
+/** The receipt photo of an order in the driver's current run. */
+async function orderReceipt(req, res) {
+  const file = await orders.getReceiptFileForDriver(parse(v.uuidSchema, req.params.id), req.user.driver_id);
+  if (!file) throw new AppError(404, 'FILE_NOT_FOUND', 'No receipt photo was saved for this order.');
+  res.set('Content-Type', file.mime_type);
+  res.set('Cache-Control', 'private, no-store');
+  res.send(file.data);
+}
+
 async function uploadDocument(req, res) {
   const documentId = parse(v.uuidSchema, req.params.id);
   const { imageBase64, mimeType } = parse(v.imageSchema, req.body);
@@ -207,5 +217,6 @@ module.exports = {
   advanceStop,
   nextBatch,
   addPoolOrder,
+  orderReceipt,
   uploadDocument,
 };

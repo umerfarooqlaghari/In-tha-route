@@ -50,7 +50,23 @@ async function dashboard(req, res) {
   res.json(await buildDashboard(req.user));
 }
 
-/** Reads a receipt photo and returns a draft order for the staff to check. Nothing is saved. */
+/**
+ * Keeps the scanned photo so it can be attached to the order when the staff post it.
+ * A storage problem must not stop the scan: the order can still be posted without a photo.
+ */
+async function keepReceiptPhoto(user, imageBase64, mimeType) {
+  try {
+    return await files.saveImage({ imageBase64, mimeType, ownerUserId: user.id, folder: 'receipts' });
+  } catch (err) {
+    console.error(`Could not save the receipt photo: ${err.message}`);
+    return undefined;
+  }
+}
+
+/**
+ * Reads a receipt photo and returns a draft order for the staff to check.
+ * No order is saved yet; the photo is kept and joins the order when it is posted.
+ */
 async function scanReceipt(req, res) {
   const { imageBase64, mimeType } = parse(v.imageSchema, req.body);
   const image = files.decodeImage(imageBase64, mimeType);
@@ -59,6 +75,9 @@ async function scanReceipt(req, res) {
     pricing.getConfig(),
     ocr.scanReceipt(image.base64, mimeType),
   ]);
+
+  // Only photos that really were receipts get here (the scan throws otherwise).
+  const savingPhoto = keepReceiptPhoto(req.user, image.base64, mimeType);
 
   let distanceMiles = 0;
   let dropoffCoords = null;
@@ -77,6 +96,7 @@ async function scanReceipt(req, res) {
     draft: {
       id: `scan-${Date.now()}`,
       ...receipt,
+      receiptFileId: await savingPhoto,
       postcode: geo.formatPostcode(receipt.postcode),
       phoneAccessCode: receipt.phoneAccessCode || undefined,
       directCustomerPhone: receipt.directCustomerPhone || undefined,
@@ -100,6 +120,15 @@ async function createOrder(req, res) {
   const input = parse(v.createOrderSchema, req.body);
   const order = await orders.createOrder(req.user, input);
   res.status(201).json({ order, dashboard: await buildDashboard(req.user) });
+}
+
+/** The receipt photo an order was scanned from. */
+async function orderReceipt(req, res) {
+  const file = await orders.getReceiptFile(parse(v.uuidSchema, req.params.id), { restaurantId: req.user.restaurant_id });
+  if (!file) throw new AppError(404, 'FILE_NOT_FOUND', 'No receipt photo was saved for this order.');
+  res.set('Content-Type', file.mime_type);
+  res.set('Cache-Control', 'private, no-store');
+  res.send(file.data);
 }
 
 async function markOrderReady(req, res) {
@@ -128,4 +157,13 @@ async function updatePolicy(req, res) {
   res.json({ dashboard: await buildDashboard(req.user) });
 }
 
-module.exports = { dashboard, scanReceipt, createOrder, markOrderReady, cancelOrder, addDriver, updatePolicy };
+module.exports = {
+  dashboard,
+  scanReceipt,
+  createOrder,
+  orderReceipt,
+  markOrderReady,
+  cancelOrder,
+  addDriver,
+  updatePolicy,
+};
