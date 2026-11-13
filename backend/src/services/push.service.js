@@ -141,7 +141,8 @@ async function orderUpdate(orderIds, kind) {
   const ids = [].concat(orderIds).filter(Boolean);
   if (ids.length === 0) return 0;
   const { rows } = await db.query(
-    `SELECT o.id, o.external_order_id, o.postcode, r.owner_user_id, u.full_name AS driver
+    `SELECT o.id, o.external_order_id, o.postcode, o.hybrid, r.owner_user_id, u.full_name AS driver,
+            d.driver_type
        FROM orders o JOIN restaurants r ON r.id = o.restaurant_id
        LEFT JOIN driver_profiles d ON d.id = o.assigned_driver_id
        LEFT JOIN users u ON u.id = d.user_id
@@ -151,8 +152,10 @@ async function orderUpdate(orderIds, kind) {
   let sent = 0;
   for (const o of rows) {
     const driver = o.driver ? o.driver.split(' ')[0] : 'Your driver';
+    // On a hybrid order the restaurant wants to know which kind of driver took it.
+    const who = o.hybrid ? (o.driver_type === 'restaurant_own' ? ' (your driver)' : ' (platform driver)') : '';
     const text = {
-      accepted: [`Driver on the way`, `${driver} accepted ${ref(o)} and is heading to you.`],
+      accepted: [`Driver on the way`, `${driver}${who} accepted ${ref(o)} and is heading to you.`],
       picked_up: [`Order collected`, `${driver} picked up ${ref(o)}.`],
       delivered: [`Order delivered`, `${ref(o)} was delivered to ${o.postcode}.`],
     }[kind];
@@ -184,7 +187,7 @@ async function driverReviewed(driverId, approved) {
 /** A new order in the open pool near a driver who has room for it. First to accept gets it. */
 async function newOrderNearby(userId, order) {
   return sendToUsers([userId], {
-    title: `New order nearby · ${gbp(order.pay)}`,
+    title: order.inHouse ? `New order from ${order.restaurant}` : `New order nearby · ${gbp(order.pay)}`,
     body: `${order.restaurant} to ${order.postcode}. First driver to accept gets it.`,
     data: { type: 'offer', orderId: order.id },
   });

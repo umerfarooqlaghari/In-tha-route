@@ -12,7 +12,7 @@ const { shortArea } = require('./driver.service');
 const ORDER_SELECT = `
   SELECT o.*, r.name AS restaurant_name, r.address AS restaurant_address,
          r.postcode AS restaurant_postcode, r.phone AS restaurant_phone, r.latitude AS pickup_latitude,
-         r.longitude AS pickup_longitude, u.full_name AS driver_name
+         r.longitude AS pickup_longitude, u.full_name AS driver_name, d.driver_type AS assigned_driver_type
     FROM orders o
     JOIN restaurants r ON r.id = o.restaurant_id
     LEFT JOIN driver_profiles d ON d.id = o.assigned_driver_id
@@ -87,6 +87,9 @@ function toLiveOrder(row, { view, now = new Date(), maskDelivered = false, nextP
     status: delivered && maskDelivered ? 'picked_up' : row.status,
     assignedDriverId: row.assigned_driver_id || undefined,
     assignedDriverName: row.driver_name || undefined,
+    // Whether the driver who has it is the restaurant's own or a platform driver.
+    assignedDriverType: row.assigned_driver_type || undefined,
+    hybrid: Boolean(row.hybrid),
     batchId: row.batch_id || undefined,
     batchPosition: row.batch_position,
     restaurantFeeGbp: view === 'driver' || pool ? 0 : fee,
@@ -139,20 +142,23 @@ async function listBatch(batchId, { maskDelivered }) {
 async function listPool(driverRow, config) {
   const room = await dispatch.driverRoom(db, driverRow, config);
   if (room.reason) return { orders: [], room };
+  // An in-house driver sees only their own restaurant's hybrid orders, wherever they are.
+  const inHouse = driverRow.driver_type === 'restaurant_own';
   const { rows } = await db.query(
     `${ORDER_SELECT}
       WHERE o.batch_id IS NULL AND o.dispatch_type = 'open_platform'
         AND o.status IN ('preparing', 'ready_for_pickup')
+        AND ($3::uuid IS NULL OR (o.hybrid AND o.restaurant_id = $3))
         AND NOT EXISTS (
               SELECT 1 FROM batch_declines x
                WHERE x.driver_id = $1 AND x.order_id = o.id
                  AND x.created_at > now() - make_interval(mins => $2))
       ORDER BY o.ready_at ASC LIMIT 100`,
-    [driverRow.id, dispatch.REOFFER_AFTER_MINUTES]
+    [driverRow.id, dispatch.REOFFER_AFTER_MINUTES, inHouse ? driverRow.employer_restaurant_id : null]
   );
   const orders = rows
     .filter((r) =>
-      dispatch.withinReach(room.here, coordsOf(r.pickup_latitude, r.pickup_longitude), config)
+      inHouse || dispatch.withinReach(room.here, coordsOf(r.pickup_latitude, r.pickup_longitude), config)
     )
     .slice(0, 50)
     .map((r) =>
@@ -162,7 +168,7 @@ async function listPool(driverRow, config) {
           config,
           Number(r.distance_miles),
           room.activeOrders + 1,
-          'open_platform'
+          inHouse ? 'own_driver' : 'open_platform'
         ).driverPayoutGbp,
       })
     );
@@ -260,6 +266,18 @@ async function createOrder(user, input) {
   const restaurant = await restaurants.ensureCoords(await restaurants.getWithCounts(user.restaurant_id));
   await rejectDuplicate(db, restaurant.id, input); // fail fast, before the address lookups
 
+  if (input.dispatchType === 'hybrid' && restaurant.driver_policy !== 'hybrid') {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed.', [
+      {
+        field: 'dispatchType',
+        message: 'Turn on "Hybrid" in your delivery settings to post an order for both your drivers and platform drivers.',
+      },
+    ]);
+  }
+  // A hybrid order sits in the open pool like a platform order; only who can see it differs.
+  const hybrid = input.dispatchType === 'hybrid';
+  const dispatchType = hybrid ? 'open_platform' : input.dispatchType;
+
   if (input.dispatchType === 'open_platform' && restaurant.driver_policy === 'own_drivers') {
     throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed.', [
       {
@@ -283,7 +301,7 @@ async function createOrder(user, input) {
   }
 
   const dropoff = await locateDropoff(restaurant, input.deliveryAddress, input.postcode, config);
-  const fin = pricing.calculateOrderFinancials(config, dropoff.distanceMiles, 1, input.dispatchType);
+  const fin = pricing.calculateOrderFinancials(config, dropoff.distanceMiles, 1, dispatchType);
 
   const orderId = await db.withTransaction(async (client) => {
     // One post at a time per order number, so two taps at once cannot both get through.
@@ -299,9 +317,9 @@ async function createOrder(user, input) {
          restaurant_id, source, external_order_id, customer_name, customer_phone, phone_access_code,
          direct_customer_phone, delivery_address, postcode, delivery_instructions, restaurant_pickup_note,
          distance_miles, dropoff_latitude, dropoff_longitude, prep_minutes, ready_at, order_total_gbp,
-         items, dispatch_type, status, restaurant_fee_gbp, driver_payout_gbp, created_by, receipt_file_id)
+         items, dispatch_type, status, restaurant_fee_gbp, driver_payout_gbp, created_by, receipt_file_id, hybrid)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-               now() + make_interval(mins => $15), $16, $17, $18, 'preparing', $19, $20, $21, $22)
+               now() + make_interval(mins => $15), $16, $17, $18, 'preparing', $19, $20, $21, $22, $23)
        RETURNING id`,
       [
         restaurant.id,
@@ -321,11 +339,12 @@ async function createOrder(user, input) {
         input.prepMinutes,
         input.orderTotalGbp,
         JSON.stringify(input.items),
-        input.dispatchType,
+        dispatchType,
         fin.restaurantFeeGbp,
         fin.driverPayoutGbp,
         user.id,
         receiptFileId,
+        hybrid,
       ]
     );
     if (input.dispatchType === 'own_driver') {

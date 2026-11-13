@@ -103,6 +103,10 @@ export interface LiveOrder {
   status: OrderStatus;
   assignedDriverId?: string;
   assignedDriverName?: string;
+  /** Whether the driver who has it is the restaurant's own or a platform driver. */
+  assignedDriverType?: 'platform_contracted' | 'restaurant_own';
+  /** Posted to the pool for the restaurant's own drivers and platform drivers alike. */
+  hybrid?: boolean;
   batchId?: string;
   batchPosition?: number;
   restaurantFeeGbp: number;
@@ -373,7 +377,7 @@ interface InThaRouteContextType {
   publishScannedOrder: (params: {
     template: ReceiptTemplate;
     prepMinutes: number;
-    dispatchType: 'open_platform' | 'own_driver';
+    dispatchType: 'open_platform' | 'own_driver' | 'hybrid';
     ownDriverId?: string;
     customAddress?: string;
     customPostcode?: string;

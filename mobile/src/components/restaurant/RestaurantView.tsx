@@ -58,6 +58,15 @@ export function RestaurantView() {
 /* New order — 3 step flow                                                     */
 /* ========================================================================== */
 
+/** Who an order is posted for: the platform pool, one of the restaurant's drivers, or both (hybrid). */
+type Dispatch = 'open_platform' | 'own_driver' | 'hybrid';
+
+const defaultDispatch = (policy: DriverPolicy): Dispatch =>
+  policy === 'own_drivers' ? 'own_driver' : policy === 'hybrid' ? 'hybrid' : 'open_platform';
+
+/** "Your driver" or "Platform driver", for the driver who has an order. */
+const driverKind = (o: LiveOrder) => (o.assignedDriverType === 'restaurant_own' ? 'Your driver' : 'Platform driver');
+
 type Step = 'scan' | 'confirm' | 'prep' | 'done';
 const STEP_INDEX: Record<Step, number> = { scan: 0, confirm: 1, prep: 2, done: 3 };
 const PREP_OPTIONS = [10, 15, 20, 30, 40];
@@ -90,6 +99,7 @@ function NewOrderScreen() {
   // (the list refreshes every few seconds).
   const ownDrivers = myDrivers.filter((d) => (d.activeOrders ?? 0) < algorithm.maxBatchSize);
   const platformAllowed = restaurant.driverPolicy !== 'own_drivers';
+  const hybridPolicy = restaurant.driverPolicy === 'hybrid';
 
   const [step, setStep] = useState<Step>('scan');
   const [template, setTemplate] = useState<ReceiptTemplate | null>(null);
@@ -101,9 +111,15 @@ function NewOrderScreen() {
   const [note, setNote] = useState('');
   const [showItems, setShowItems] = useState(false);
   const [prep, setPrep] = useState(20);
-  const [dispatch, setDispatch] = useState<'open_platform' | 'own_driver'>(
-    restaurant.driverPolicy === 'own_drivers' ? 'own_driver' : 'open_platform'
-  );
+  const [pickedDispatch, setDispatch] = useState<Dispatch>(defaultDispatch(restaurant.driverPolicy));
+  // Follows the delivery setting if it changes while this screen is open.
+  const dispatch: Dispatch = !platformAllowed
+    ? 'own_driver'
+    : pickedDispatch === 'own_driver'
+      ? 'own_driver'
+      : hybridPolicy
+        ? 'hybrid'
+        : 'open_platform';
   const [pickedDriverId, setOwnDriverId] = useState<string | undefined>(ownDrivers[0]?.id);
   // If the chosen driver fills up meanwhile, fall back to the first one with room.
   const ownDriverId = ownDrivers.some((d) => d.id === pickedDriverId) ? pickedDriverId : ownDrivers[0]?.id;
@@ -135,8 +151,8 @@ function NewOrderScreen() {
     const order = await publishScannedOrder({
       template,
       prepMinutes: prep,
-      dispatchType: platformAllowed ? dispatch : 'own_driver',
-      ownDriverId: dispatch === 'own_driver' || !platformAllowed ? ownDriverId : undefined,
+      dispatchType: dispatch,
+      ownDriverId: dispatch === 'own_driver' ? ownDriverId : undefined,
       customAddress: address.trim(),
       customPostcode: postcode.trim(),
       customAccessCode: accessCode.trim(),
@@ -170,9 +186,11 @@ function NewOrderScreen() {
         </View>
         <Text style={styles.doneTitle}>Order is live</Text>
         <Text style={styles.doneSubtitle} numberOfLines={2}>
-          {live.dispatchType === 'own_driver'
-            ? `Assigned to ${live.assignedDriverName ?? 'your driver'}`
-            : 'Nearby drivers can see it now'}
+          {live.assignedDriverName
+            ? `${live.assignedDriverName} has it${live.hybrid ? ` · ${driverKind(live)}` : ''}`
+            : live.hybrid
+              ? 'Your drivers and nearby platform drivers can see it now'
+              : 'Nearby drivers can see it now'}
         </Text>
 
         <Card style={styles.doneCard}>
@@ -345,19 +363,24 @@ function NewOrderScreen() {
 
           <Card>
             <Text style={styles.cardTitle}>Who delivers?</Text>
-            <Segmented
-              value={platformAllowed ? dispatch : 'own_driver'}
+            <Segmented<Dispatch>
+              value={dispatch}
               onChange={setDispatch}
               options={
-                platformAllowed
-                  ? [
-                      { value: 'open_platform', label: 'Platform driver' },
-                      { value: 'own_driver', label: 'My driver' },
-                    ]
-                  : [{ value: 'own_driver', label: 'My driver' }]
+                !platformAllowed
+                  ? [{ value: 'own_driver', label: 'My driver' }]
+                  : hybridPolicy
+                    ? [
+                        { value: 'hybrid', label: 'Everyone' },
+                        { value: 'own_driver', label: 'My driver' },
+                      ]
+                    : [
+                        { value: 'open_platform', label: 'Platform driver' },
+                        { value: 'own_driver', label: 'My driver' },
+                      ]
               }
             />
-            {dispatch === 'own_driver' || !platformAllowed ? (
+            {dispatch === 'own_driver' ? (
               ownDrivers.length ? (
                 ownDrivers.map((d) => (
                   <ListRow
@@ -383,10 +406,19 @@ function NewOrderScreen() {
                 <Hint>Add a driver under My drivers first.</Hint>
               )
             ) : (
-              <View style={styles.rowBetween}>
-                <Text style={styles.muted}>Delivery fee</Text>
-                <Text style={styles.mutedStrong}>{formatGbp(template.estimatedFeeGbp)}</Text>
-              </View>
+              <>
+                {dispatch === 'hybrid' && (
+                  <Hint>
+                    Your drivers and nearby platform drivers all see this order. The first to accept gets it.
+                  </Hint>
+                )}
+                <View style={styles.rowBetween}>
+                  <Text style={styles.muted}>
+                    {dispatch === 'hybrid' ? 'Delivery fee (none if your driver takes it)' : 'Delivery fee'}
+                  </Text>
+                  <Text style={styles.mutedStrong}>{formatGbp(template.estimatedFeeGbp)}</Text>
+                </View>
+              </>
             )}
           </Card>
 
@@ -397,7 +429,7 @@ function NewOrderScreen() {
               icon="send"
               onPress={post}
               loading={posting}
-              disabled={posting || ((dispatch === 'own_driver' || !platformAllowed) && !ownDriverId)}
+              disabled={posting || (dispatch === 'own_driver' && !ownDriverId)}
               style={styles.flex2}
             />
           </View>
@@ -602,7 +634,15 @@ function LiveOrdersScreen() {
                     <Text style={styles.driverName} numberOfLines={1}>
                       {o.assignedDriverName}
                     </Text>
+                    {o.assignedDriverType && (
+                      <Badge
+                        label={driverKind(o)}
+                        tone={o.assignedDriverType === 'restaurant_own' ? 'info' : 'neutral'}
+                      />
+                    )}
                   </View>
+                ) : o.hybrid ? (
+                  <Badge label="Hybrid pool" tone="neutral" />
                 ) : null}
               </View>
 
@@ -813,7 +853,7 @@ const POLICIES: {
   icon: keyof typeof Ionicons.glyphMap;
 }[] = [
   { value: 'open_platform', title: 'Platform drivers', subtitle: 'Any verified driver nearby', icon: 'globe-outline' },
-  { value: 'hybrid', title: 'Hybrid', subtitle: 'Your drivers first, then platform', icon: 'git-merge-outline' },
+  { value: 'hybrid', title: 'Hybrid', subtitle: 'Your drivers and platform drivers, first to accept', icon: 'git-merge-outline' },
   { value: 'own_drivers', title: 'My drivers only', subtitle: 'Only your in-house team', icon: 'people-outline' },
 ];
 

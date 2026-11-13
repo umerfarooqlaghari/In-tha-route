@@ -479,7 +479,10 @@ function SearchingRow({ poolCount }: { poolCount: number }) {
 /* ========================================================================== */
 
 function OrderPoolScreen() {
-  const { orders, algorithm, appendOrderToDriverBatch, setActiveScreen, myLocation, capacity } = useInThaRoute();
+  const { orders, algorithm, appendOrderToDriverBatch, setActiveScreen, myLocation, capacity, me } =
+    useInThaRoute();
+  // In-house drivers see their own restaurant's hybrid orders here, with no platform pay.
+  const inHouse = me?.driverType === 'restaurant_own';
   const { busy, run } = useBusy();
   const [toast, setToast] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -573,7 +576,11 @@ function OrderPoolScreen() {
                   </View>
                   <SourceBadge source={o.source} />
                 </View>
-                <Text style={styles.earn}>+{formatGbp(pay)}</Text>
+                {inHouse ? (
+                  <Badge label="Your restaurant" tone="info" />
+                ) : (
+                  <Text style={styles.earn}>+{formatGbp(pay)}</Text>
+                )}
               </View>
               <View style={styles.gap2}>
                 <Text style={styles.cardTitle} numberOfLines={1}>

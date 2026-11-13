@@ -47,7 +47,8 @@ const createOrderSchema = z
       .int()
       .min(1, 'Preparation time must be at least 1 minute.')
       .max(180, 'Preparation time is too long.'),
-    dispatchType: z.enum(['open_platform', 'own_driver'], { error: 'Choose who delivers this order.' }),
+    // hybrid: the pool, open to the restaurant's own drivers and platform drivers alike.
+    dispatchType: z.enum(['open_platform', 'own_driver', 'hybrid'], { error: 'Choose who delivers this order.' }),
     ownDriverId: z.uuid('Choose one of your drivers.').optional(),
     // The photo saved by the scan this order came from.
     receiptFileId: z.uuid().optional().catch(undefined),

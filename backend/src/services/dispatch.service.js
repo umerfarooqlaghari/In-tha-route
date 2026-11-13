@@ -74,19 +74,21 @@ async function activeOrderCount(client, driverId) {
 }
 
 /**
- * Whether a platform driver can take new orders now, and why not.
+ * Whether a driver can take new pool orders now, and why not. In-house drivers only take
+ * their own restaurant's hybrid orders, and need no location for that (the restaurant can
+ * give them an order wherever they are, too).
  * @returns {{activeOrders: number, maxOrders: number, here: object|null,
- *            reason: null | 'not_platform' | 'offline' | 'no_location' | 'full'}}
+ *            reason: null | 'offline' | 'no_location' | 'full'}}
  */
 async function driverRoom(client, driver, config) {
   const activeOrders = await activeOrderCount(client, driver.id);
   const here = freshLocation(driver);
   const maxOrders = config.maxBatchSize;
+  const inHouse = driver.driver_type === 'restaurant_own';
   let reason = null;
-  if (driver.driver_type !== 'platform_contracted') reason = 'not_platform';
-  else if (driver.status !== 'approved_online') reason = 'offline';
+  if (driver.status !== 'approved_online') reason = 'offline';
   else if (activeOrders >= maxOrders) reason = 'full';
-  else if (!here) reason = 'no_location';
+  else if (!here && !inHouse) reason = 'no_location';
   return { activeOrders, maxOrders, here, reason };
 }
 
@@ -104,8 +106,8 @@ async function notifyNearbyDrivers(orderId) {
   const push = require('./push.service');
   const config = await pricing.getConfig();
   const { rows: found } = await db.query(
-    `SELECT o.id, o.distance_miles, o.external_order_id, o.postcode, r.name AS restaurant,
-            r.latitude, r.longitude
+    `SELECT o.id, o.distance_miles, o.external_order_id, o.postcode, o.hybrid, o.restaurant_id,
+            r.name AS restaurant, r.latitude, r.longitude
        FROM orders o JOIN restaurants r ON r.id = o.restaurant_id
       WHERE o.id = $1 AND o.batch_id IS NULL AND o.dispatch_type = 'open_platform'
         AND o.status IN ('preparing', 'ready_for_pickup')`,
@@ -113,25 +115,30 @@ async function notifyNearbyDrivers(orderId) {
   );
   const order = found[0];
   if (!order) return [];
+  // Platform drivers, plus the restaurant's own drivers when it is a hybrid order.
   const { rows: drivers } = await db.query(
     `SELECT d.*, (SELECT count(*) FROM orders x
                    WHERE x.assigned_driver_id = d.id AND x.status IN ${ACTIVE_STATUSES})::int AS active_orders
        FROM driver_profiles d JOIN users u ON u.id = d.user_id
-      WHERE d.driver_type = 'platform_contracted' AND d.status = 'approved_online' AND u.is_active
+      WHERE (d.driver_type = 'platform_contracted'
+             OR ($3 AND d.driver_type = 'restaurant_own' AND d.employer_restaurant_id = $4))
+        AND d.status = 'approved_online' AND u.is_active
         AND NOT EXISTS (
               SELECT 1 FROM batch_declines x
                WHERE x.driver_id = d.id AND x.order_id = $1
                  AND x.created_at > now() - make_interval(mins => $2))`,
-    [orderId, REOFFER_AFTER_MINUTES]
+    [orderId, REOFFER_AFTER_MINUTES, order.hybrid, order.restaurant_id]
   );
   const told = [];
   for (const d of drivers) {
+    const inHouse = d.driver_type === 'restaurant_own';
     const here = freshLocation(d);
-    if (!here || d.active_orders >= config.maxBatchSize || !withinReach(here, order, config)) continue;
+    if (d.active_orders >= config.maxBatchSize) continue;
+    if (!inHouse && (!here || !withinReach(here, order, config))) continue;
     const pay = pricing.calculateOrderFinancials(
-      config, Number(order.distance_miles), d.active_orders + 1, 'open_platform'
+      config, Number(order.distance_miles), d.active_orders + 1, inHouse ? 'own_driver' : 'open_platform'
     ).driverPayoutGbp;
-    await push.newOrderNearby(d.user_id, { ...order, pay });
+    await push.newOrderNearby(d.user_id, { ...order, pay, inHouse });
     told.push(d.id);
   }
   return told;
@@ -328,15 +335,17 @@ async function fileDeliveredOrders(client, batch, count) {
 }
 
 /**
- * A platform driver accepts an order from the open pool. The first driver to accept gets
- * it; anyone else is told it has been taken.
+ * A driver accepts an order from the open pool. The first driver to accept gets it;
+ * anyone else is told it has been taken. In-house drivers can take their own restaurant's
+ * hybrid orders: the order then becomes an in-house delivery, with no fee and no platform pay.
  * @returns {{ok: boolean, message: string, orderId?: string}}
  */
 async function appendPoolOrder(driverId, orderId) {
   return db.withTransaction(async (client) => {
     const driver = await lockDriver(client, driverId);
-    if (driver.driver_type !== 'platform_contracted' || !isApproved(driver.status)) {
-      throw new AppError(403, 'DRIVER_NOT_APPROVED', 'Only approved platform drivers can take pool orders.');
+    const inHouse = driver.driver_type === 'restaurant_own';
+    if (!isApproved(driver.status)) {
+      throw new AppError(403, 'DRIVER_NOT_APPROVED', 'Only approved drivers can take pool orders.');
     }
     const config = await pricing.getConfig(client);
     const room = await driverRoom(client, driver, config);
@@ -354,7 +363,7 @@ async function appendPoolOrder(driverId, orderId) {
     // If another driver is taking the same order this waits for them to finish, then checks
     // again: the first to commit gets it, the other is told it has been taken.
     const { rows } = await client.query(
-      `SELECT o.id, o.distance_miles, r.latitude, r.longitude
+      `SELECT o.id, o.distance_miles, o.hybrid, o.restaurant_id, r.latitude, r.longitude
          FROM orders o JOIN restaurants r ON r.id = o.restaurant_id
         WHERE o.id = $1 AND o.batch_id IS NULL AND o.dispatch_type = 'open_platform'
           AND o.status IN ('preparing', 'ready_for_pickup')
@@ -363,13 +372,16 @@ async function appendPoolOrder(driverId, orderId) {
     );
     const order = rows[0];
     if (!order) return { ok: false, message: 'That order has just been taken.' };
+    if (inHouse && !(order.hybrid && order.restaurant_id === driver.employer_restaurant_id)) {
+      return { ok: false, message: 'This order is only for platform drivers.' };
+    }
     const declined = await client.query(
       `SELECT 1 FROM batch_declines WHERE driver_id = $1 AND order_id = $2
           AND created_at > now() - make_interval(mins => $3)`,
       [driverId, orderId, REOFFER_AFTER_MINUTES]
     );
     if (declined.rows[0]) return { ok: false, message: 'This order has been given to another driver.' };
-    if (!withinReach(room.here, order, config)) {
+    if (!inHouse && !withinReach(room.here, order, config)) {
       return { ok: false, message: 'This order is too far from where you are now.' };
     }
 
@@ -386,10 +398,11 @@ async function appendPoolOrder(driverId, orderId) {
     const count = await fileDeliveredOrders(client, batch, await countOrders(client, batch.id));
 
     const position = count + 1;
-    const fin = pricing.calculateOrderFinancials(config, Number(order.distance_miles), position, 'open_platform');
+    const dispatchType = inHouse ? 'own_driver' : 'open_platform';
+    const fin = pricing.calculateOrderFinancials(config, Number(order.distance_miles), position, dispatchType);
     await client.query(
       `UPDATE orders SET batch_id = $1, batch_position = $2, assigned_driver_id = $3, status = $4,
-              restaurant_fee_gbp = $5, driver_payout_gbp = $6
+              restaurant_fee_gbp = $5, driver_payout_gbp = $6, dispatch_type = $8
         WHERE id = $7`,
       [
         batch.id,
@@ -399,6 +412,7 @@ async function appendPoolOrder(driverId, orderId) {
         fin.restaurantFeeGbp,
         fin.driverPayoutGbp,
         order.id,
+        dispatchType,
       ]
     );
     return {

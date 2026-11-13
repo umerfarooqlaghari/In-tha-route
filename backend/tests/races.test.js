@@ -461,3 +461,77 @@ describe('orders that need attention', () => {
     assert.equal(dash.body.orders.find((o) => o.id === a).attention, 'late_delivery');
   });
 });
+
+describe('hybrid: one pool for in-house and platform drivers', () => {
+  let ali, platformDriver;
+  const postHybrid = (ref, dispatchType = 'hybrid') =>
+    request(app).post('/api/restaurant/orders').set(bearer(restaurant)).send({
+      source: 'Uber Eats', externalOrderId: ref, customerName: 'Anna T.', customerPhone: '+442033195035',
+      deliveryAddress: '19 Rosemont Rd, Richmond', postcode: 'TW10 6QN', prepMinutes: 20, dispatchType, items: [],
+    });
+  const restaurantOrder = async (id) =>
+    (await request(app).get('/api/restaurant/dashboard').set(bearer(restaurant))).body.orders.find((o) => o.id === id);
+
+  before(async () => {
+    await clearRuns();
+    platformDriver = drivers[0];
+    const login = await request(app).post('/api/auth/login').send({ email: 'ali@races.test', password: 'Passw0rd123' });
+    ali = { token: login.body.tokens.accessToken };
+    // In-house drivers need no GPS fix to see their restaurant's hybrid orders.
+    const res = await request(app).put('/api/driver/availability').set(bearer(ali)).send({ online: true });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+  });
+
+  test('a hybrid order needs the Hybrid delivery setting', async () => {
+    await request(app).patch('/api/restaurant/policy').set(bearer(restaurant)).send({ driverPolicy: 'open_platform' });
+    const res = await postHybrid('#Y0');
+    assert.equal(res.status, 400);
+    assert.match(JSON.stringify(res.body), /Hybrid/);
+    await request(app).patch('/api/restaurant/policy').set(bearer(restaurant)).send({ driverPolicy: 'hybrid' });
+  });
+
+  test('both kinds of driver see a hybrid order; a platform-only order stays hidden from in-house drivers', async () => {
+    const hybridId = (await postHybrid('#Y1')).body.order.id;
+    const platformOnlyId = (await postHybrid('#Y2', 'open_platform')).body.order.id;
+    assert.ok((await poolIds(ali)).includes(hybridId));
+    assert.ok(!(await poolIds(ali)).includes(platformOnlyId));
+    const seen = await poolIds(platformDriver);
+    assert.ok(seen.includes(hybridId) && seen.includes(platformOnlyId));
+    const shown = await restaurantOrder(hybridId);
+    assert.equal(shown.hybrid, true);
+    assert.equal(shown.assignedDriverType, undefined);
+  });
+
+  test('an in-house driver who accepts it makes it an in-house delivery, shown as "your driver"', async () => {
+    const id = (await postHybrid('#Y3')).body.order.id;
+    const res = await request(app).post(`/api/driver/pool/${id}/add`).set(bearer(ali));
+    assert.equal(res.body.ok, true, res.body.message);
+    const row = await orderRow(id);
+    assert.equal(row.dispatch_type, 'own_driver');
+    assert.equal(Number(row.restaurant_fee_gbp), 0);
+    assert.equal(Number(row.driver_payout_gbp), 0);
+    assert.ok(!(await poolIds(platformDriver)).includes(id), 'gone from the pool');
+    const late = await request(app).post(`/api/driver/pool/${id}/add`).set(bearer(platformDriver));
+    assert.equal(late.body.ok, false);
+    const shown = await restaurantOrder(id);
+    assert.equal(shown.assignedDriverType, 'restaurant_own');
+    assert.equal(shown.assignedDriverName, 'Ali Khan');
+  });
+
+  test('a platform driver who accepts it is paid as usual, shown as "platform driver"', async () => {
+    const id = (await postHybrid('#Y4')).body.order.id;
+    const res = await request(app).post(`/api/driver/pool/${id}/add`).set(bearer(platformDriver));
+    assert.equal(res.body.ok, true, res.body.message);
+    const row = await orderRow(id);
+    assert.equal(row.dispatch_type, 'open_platform');
+    assert.ok(Number(row.restaurant_fee_gbp) > 0 && Number(row.driver_payout_gbp) > 0);
+    assert.equal((await restaurantOrder(id)).assignedDriverType, 'platform_contracted');
+  });
+
+  test('an in-house driver cannot take a platform-only order', async () => {
+    const id = (await postHybrid('#Y5', 'open_platform')).body.order.id;
+    const res = await request(app).post(`/api/driver/pool/${id}/add`).set(bearer(ali));
+    assert.equal(res.body.ok, false);
+    assert.equal((await orderRow(id)).assigned_driver_id, null);
+  });
+});

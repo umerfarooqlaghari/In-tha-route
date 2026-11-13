@@ -88,13 +88,13 @@ const BATCH_STATUS = { offered: 'offered', accepted: 'accepted_navigating', comp
 async function buildDashboard(user) {
   let { row, profile } = await drivers.getSelf(user.driver_id);
   const approved = drivers.isApproved(row.status);
-  const platform = row.driver_type === 'platform_contracted';
 
   const config = await pricing.getConfig();
   const batch = approved ? await dispatch.currentBatch(db, row.id) : null;
   const batchOrders = batch ? await orders.listBatch(batch.id, { maskDelivered: batch.status === 'accepted' }) : [];
-  // Platform drivers see the open pool near them while they have room in their run.
-  const pool = approved && platform ? await orders.listPool(row, config) : null;
+  // Platform drivers see the open pool near them while they have room in their run;
+  // in-house drivers see their own restaurant's hybrid orders in it.
+  const pool = approved ? await orders.listPool(row, config) : null;
 
   return {
     role: 'driver',
@@ -107,7 +107,7 @@ async function buildDashboard(user) {
     capacity: {
       activeOrders: pool ? pool.room.activeOrders : profile.activeOrders,
       maxOrders: config.maxBatchSize,
-      poolBlockedBy: pool && pool.room.reason !== 'not_platform' ? pool.room.reason : null,
+      poolBlockedBy: pool ? pool.room.reason : null,
     },
     algorithm: driverPricing(config),
     currentBatchId: batch ? batch.id : null,
