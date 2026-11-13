@@ -497,6 +497,8 @@ function DriversScreen() {
           const approved = d.approval ? d.approval === 'approved' : d.status === 'approved_online';
           const rejected = d.approval === 'rejected';
           const missing = d.kycDocuments.some((k) => k.status === 'missing');
+          // An approved driver who uploads a new or replaced document still needs it checked.
+          const toVerify = approved && d.kycDocuments.some((k) => k.status === 'pending');
           const open = expanded === d.id;
           return (
             <Card key={d.id}>
@@ -559,9 +561,9 @@ function DriversScreen() {
                   </Pressable>
                 ))}
 
-              {!approved && (
+              {(!approved || toVerify) && (
                 <View style={styles.actionRow}>
-                  {!rejected && (
+                  {!approved && !rejected && (
                     <Button
                       label="Reject"
                       variant="secondary"
@@ -573,11 +575,11 @@ function DriversScreen() {
                     />
                   )}
                   <Button
-                    label="Approve driver"
+                    label={approved ? 'Verify documents' : 'Approve driver'}
                     variant="success"
                     icon="checkmark"
                     loading={busy === `approve-${d.id}`}
-                    disabled={!!busy || missing || d.kycDocuments.length === 0}
+                    disabled={!!busy || (!approved && missing) || d.kycDocuments.length === 0}
                     onPress={() => approve(d)}
                     style={styles.flex2}
                   />

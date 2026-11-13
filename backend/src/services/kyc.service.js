@@ -9,7 +9,12 @@ const DOC_TYPES = [
   { type: 'ni_number', title: 'National Insurance (NI) Number', subtitle: 'Proof of your National Insurance number' },
   { type: 'bank_account', title: 'UK Bank Account & Sort Code', subtitle: 'Bank statement or card for weekly payouts' },
   { type: 'vehicle_insurance', title: 'Hire & Reward Vehicle Insurance', subtitle: 'Food delivery insurance certificate' },
-  { type: 'identity', title: 'Personal & Right-to-Work ID', subtitle: 'Passport or residence permit' },
+  { type: 'identity', title: 'Personal Identity Document', subtitle: 'Passport or other government photo ID' },
+  {
+    type: 'right_to_work',
+    title: 'Right to Work in the UK',
+    subtitle: 'UK or Irish passport, or a screenshot of your Home Office share code',
+  },
 ];
 const ORDER = new Map(DOC_TYPES.map((d, i) => [d.type, i]));
 const META = new Map(DOC_TYPES.map((d) => [d.type, d]));
@@ -102,20 +107,23 @@ async function lockPlatformDriver(driverId, client) {
 async function approve(driverId, adminUserId) {
   return db.withTransaction(async (client) => {
     const driver = await lockPlatformDriver(driverId, client);
+    const awaitingApproval = driver.status === 'pending_kyc' || driver.status === 'rejected';
     const missing = await client.query(
       `SELECT count(*)::int AS n FROM kyc_documents WHERE driver_id = $1 AND status = 'missing'`,
       [driverId]
     );
-    if (missing.rows[0].n > 0) {
+    // A driver who is already working keeps working while a document added later is
+    // still to upload; what they have uploaded since can be verified on its own.
+    if (awaitingApproval && missing.rows[0].n > 0) {
       throw new AppError(400, 'DOCUMENTS_MISSING', 'This driver has not uploaded all of their documents yet.');
     }
     await client.query(
       `UPDATE kyc_documents SET status = 'verified', note = NULL, reviewed_by = $2, updated_at = now()
-        WHERE driver_id = $1`,
+        WHERE driver_id = $1 AND status <> 'missing'`,
       [driverId, adminUserId]
     );
     // Approved drivers start offline and go online from the Drive screen.
-    if (driver.status === 'pending_kyc' || driver.status === 'rejected') {
+    if (awaitingApproval) {
       await client.query(`UPDATE driver_profiles SET status = 'offline', updated_at = now() WHERE id = $1`, [driverId]);
     }
   });

@@ -73,7 +73,7 @@ after(async () => {
 describe('migrations', () => {
   test('apply cleanly on an empty database', async () => {
     const ran = await runMigrations(pool, () => {});
-    assert.deepEqual(ran, ['001_auth.sql', '002_operations.sql', '003_driver_location.sql', '004_chat.sql', '005_file_storage.sql', '006_push_tokens.sql', '007_order_safety.sql', '008_open_pool.sql', '009_order_receipts.sql']);
+    assert.deepEqual(ran, ['001_auth.sql', '002_operations.sql', '003_driver_location.sql', '004_chat.sql', '005_file_storage.sql', '006_push_tokens.sql', '007_order_safety.sql', '008_open_pool.sql', '009_order_receipts.sql', '010_right_to_work.sql']);
     const { rows } = await pool.query(
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1`
     );

@@ -891,6 +891,7 @@ const DOC_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
   'card-outline',
   'shield-checkmark-outline',
   'person-outline',
+  'briefcase-outline',
 ];
 
 const cleanTitle = (t: string) => t.replace(/\s*\(.*?\)/g, '');
@@ -977,7 +978,7 @@ function DocumentsScreen() {
               <Text style={styles.cardTitle} numberOfLines={1}>
                 {openDoc.value}
               </Text>
-              <Text style={styles.muted} numberOfLines={1}>
+              <Text style={[styles.muted, styles.docHint]} numberOfLines={2}>
                 {openDoc.subtitle}
               </Text>
             </Card>
@@ -1148,5 +1149,6 @@ const styles = StyleSheet.create({
   vDivider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', backgroundColor: C.line },
   payRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 
+  docHint: { textAlign: 'center' },
   docPreview: { alignItems: 'center', backgroundColor: C.surfaceAlt, borderWidth: 0, shadowOpacity: 0 },
 });

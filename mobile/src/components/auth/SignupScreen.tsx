@@ -108,9 +108,7 @@ export function SignupScreen({
     <AuthLayout
       title={isRestaurant ? 'Restaurant sign up' : 'Driver sign up'}
       subtitle={
-        isRestaurant
-          ? 'Post delivery orders straight from your receipts.'
-          : 'Deliver with In Tha Route. Your documents are reviewed before you start.'
+        isRestaurant ? undefined : 'Deliver with In Tha Route. Your documents are reviewed before you start.'
       }
       onBack={onBack}>
       <View style={styles.form}>
