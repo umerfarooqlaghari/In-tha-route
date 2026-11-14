@@ -85,7 +85,7 @@ export function InboxScreen() {
 
   const active = conversations.filter((c) => c.canMessage);
   const past = conversations.filter((c) => !c.canMessage);
-  const other = myRole === 'restaurant' ? 'drivers' : 'restaurants';
+  const other = myRole === 'restaurant' ? 'drivers' : 'merchants';
 
   const renderRow = (c: Conversation, i: number) => {
     const fromMe = c.lastMessage?.senderRole === myRole;
@@ -153,7 +153,7 @@ export function InboxScreen() {
             subtitle={
               myRole === 'restaurant'
                 ? 'You can message a driver once they accept one of your orders.'
-                : 'You can message a restaurant once you accept one of its orders.'
+                : 'You can message a merchant once you accept one of its orders.'
             }
           />
           <Button label="Refresh" icon="refresh" variant="secondary" onPress={refreshInbox} />

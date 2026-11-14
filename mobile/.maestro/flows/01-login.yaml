@@ -49,7 +49,7 @@ appId: host.exp.Exponent
     file: ../common/login.yaml
     env:
       EMAIL: rest@e2e.test
-- assertVisible: "Restaurant"
+- assertVisible: "Merchant"
 - runFlow:
     file: ../common/login.yaml
     env:

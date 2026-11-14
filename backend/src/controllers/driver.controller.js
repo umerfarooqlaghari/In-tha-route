@@ -185,6 +185,12 @@ async function addPoolOrder(req, res) {
   res.json({ ...result, dashboard: await buildDashboard(req.user) });
 }
 
+/** "Reject": the order disappears from this driver's pool only. */
+async function rejectPoolOrder(req, res) {
+  await dispatch.rejectPoolOrder(req.user.driver_id, parse(v.uuidSchema, req.params.id));
+  res.json({ dashboard: await buildDashboard(req.user) });
+}
+
 /** The receipt photo of an order in the driver's current run. */
 async function orderReceipt(req, res) {
   const file = await orders.getReceiptFileForDriver(parse(v.uuidSchema, req.params.id), req.user.driver_id);
@@ -217,6 +223,7 @@ module.exports = {
   advanceStop,
   nextBatch,
   addPoolOrder,
+  rejectPoolOrder,
   orderReceipt,
   uploadDocument,
 };

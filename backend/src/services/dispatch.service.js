@@ -25,6 +25,10 @@ const REOFFER_AFTER_MINUTES = 10; // an order taken off a driver is not shown ba
 const OFFER_TIMEOUT_SECONDS =
   Number(process.env.OFFER_TIMEOUT_SECONDS) > 0 ? Number(process.env.OFFER_TIMEOUT_SECONDS) : 120;
 
+// How long an order stays in the open pool before it leaves it, if nobody takes it.
+const POOL_WINDOW_SECONDS =
+  Number(process.env.POOL_WINDOW_SECONDS) > 0 ? Number(process.env.POOL_WINDOW_SECONDS) : 120;
+
 // Orders a driver still has to collect or deliver: these count towards the max per run.
 const ACTIVE_STATUSES = "('batched_offered', 'driver_assigned', 'picked_up')";
 
@@ -231,9 +235,10 @@ async function decline(driverId, { remember = true } = {}) {
       const fin = pricing.calculateOrderFinancials(config, Number(o.distance_miles), 1, o.dispatch_type);
       await client.query(
         `UPDATE orders SET batch_id = NULL, batch_position = 1, assigned_driver_id = NULL,
-                status = ${BACK_TO_POOL_STATUS}, restaurant_fee_gbp = $1, driver_payout_gbp = $2
+                status = ${BACK_TO_POOL_STATUS}, restaurant_fee_gbp = $1, driver_payout_gbp = $2,
+                pool_expires_at = now() + make_interval(secs => $4)
           WHERE id = $3`,
-        [fin.restaurantFeeGbp, fin.driverPayoutGbp, o.id]
+        [fin.restaurantFeeGbp, fin.driverPayoutGbp, o.id, POOL_WINDOW_SECONDS]
       );
       if (remember) await rememberDecline(client, driverId, o.id);
     }
@@ -367,11 +372,19 @@ async function appendPoolOrder(driverId, orderId) {
          FROM orders o JOIN restaurants r ON r.id = o.restaurant_id
         WHERE o.id = $1 AND o.batch_id IS NULL AND o.dispatch_type = 'open_platform'
           AND o.status IN ('preparing', 'ready_for_pickup')
+          AND (o.pool_expires_at IS NULL OR o.pool_expires_at > now())
         FOR UPDATE OF o`,
       [orderId]
     );
     const order = rows[0];
-    if (!order) return { ok: false, message: 'That order has just been taken.' };
+    if (!order) {
+      const left = await client.query(
+        `SELECT 1 FROM orders WHERE id = $1 AND batch_id IS NULL AND dispatch_type = 'open_platform'
+            AND status IN ('preparing', 'ready_for_pickup') AND pool_expires_at <= now()`,
+        [orderId]
+      );
+      return { ok: false, message: left.rows[0] ? 'This order has left the pool.' : 'That order has just been taken.' };
+    }
     if (inHouse && !(order.hybrid && order.restaurant_id === driver.employer_restaurant_id)) {
       return { ok: false, message: 'This order is only for platform drivers.' };
     }
@@ -417,7 +430,7 @@ async function appendPoolOrder(driverId, orderId) {
     );
     return {
       ok: true,
-      message: position === 1 ? 'Order accepted. Head to the restaurant.' : `Added as Order #${position} in your run.`,
+      message: position === 1 ? 'Order accepted. Head to the merchant.' : `Added as Order #${position} in your run.`,
       orderId: order.id,
       accepted: batch.status === 'accepted',
     };
@@ -582,16 +595,93 @@ async function releaseToPool(orderId) {
     await client.query(
       `UPDATE orders SET batch_id = NULL, batch_position = 1, assigned_driver_id = NULL,
               dispatch_type = 'open_platform', status = ${BACK_TO_POOL_STATUS},
-              restaurant_fee_gbp = $2, driver_payout_gbp = $3, no_driver_alert_at = NULL
+              restaurant_fee_gbp = $2, driver_payout_gbp = $3, no_driver_alert_at = NULL,
+              pool_expires_at = now() + make_interval(secs => $4)
         WHERE id = $1`,
-      [orderId, fin.restaurantFeeGbp, fin.driverPayoutGbp]
+      [orderId, fin.restaurantFeeGbp, fin.driverPayoutGbp, POOL_WINDOW_SECONDS]
     );
     if (order.assigned_driver_id) await rememberDecline(client, order.assigned_driver_id, orderId);
     return { order, driverUserId };
   });
 }
 
+/**
+ * A driver removes an order from their own pool. Nobody else is affected: the order stays
+ * for the other drivers, and comes back to this one only if the merchant looks for drivers again.
+ */
+async function rejectPoolOrder(driverId, orderId) {
+  const { rows } = await db.query(
+    `SELECT id FROM orders
+      WHERE id = $1 AND batch_id IS NULL AND dispatch_type = 'open_platform'
+        AND status IN ('preparing', 'ready_for_pickup')`,
+    [orderId]
+  );
+  if (rows[0]) await rememberDecline(db, driverId, orderId);
+}
+
+/** The pool order a merchant is acting on, locked: it must be theirs and still waiting for a driver. */
+async function lockWaitingOrder(client, restaurantId, orderId) {
+  const { rows } = await client.query(
+    `SELECT * FROM orders WHERE id = $1 AND restaurant_id = $2 FOR UPDATE`,
+    [orderId, restaurantId]
+  );
+  const order = rows[0];
+  if (!order) throw new AppError(404, 'ORDER_NOT_FOUND', 'Order not found.');
+  if (
+    order.dispatch_type !== 'open_platform' || order.batch_id ||
+    !['preparing', 'ready_for_pickup'].includes(order.status)
+  ) {
+    throw new AppError(409, 'ORDER_NOT_WAITING', 'This order already has a driver, or is no longer waiting for one.');
+  }
+  return order;
+}
+
+/**
+ * "Find drivers again": the order goes back into the pool for everyone, including drivers who
+ * removed it, and its window starts again.
+ */
+async function findDriversAgain(restaurantId, orderId) {
+  await db.withTransaction(async (client) => {
+    await lockWaitingOrder(client, restaurantId, orderId);
+    await client.query(
+      `UPDATE orders SET pool_expires_at = now() + make_interval(secs => $2) WHERE id = $1`,
+      [orderId, POOL_WINDOW_SECONDS]
+    );
+    await client.query('DELETE FROM batch_declines WHERE order_id = $1', [orderId]);
+  });
+}
+
+/** An order nobody took is given to one of the merchant's own drivers instead. */
+async function giveWaitingOrderToOwnDriver(restaurantId, orderId, driverId) {
+  await db.withTransaction(async (client) => {
+    const order = await lockWaitingOrder(client, restaurantId, orderId);
+    const { rows } = await client.query(
+      `SELECT 1 FROM driver_profiles d JOIN users u ON u.id = d.user_id
+        WHERE d.id = $1 AND d.employer_restaurant_id = $2 AND d.driver_type = 'restaurant_own' AND u.is_active`,
+      [driverId, restaurantId]
+    );
+    if (!rows[0]) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed.', [
+        { field: 'ownDriverId', message: 'Choose one of your drivers.' },
+      ]);
+    }
+    const config = await pricing.getConfig(client);
+    const fin = pricing.calculateOrderFinancials(config, Number(order.distance_miles), 1, 'own_driver');
+    await client.query(
+      `UPDATE orders SET dispatch_type = 'own_driver', hybrid = false, pool_expires_at = NULL,
+              restaurant_fee_gbp = $2, driver_payout_gbp = $3
+        WHERE id = $1`,
+      [orderId, fin.restaurantFeeGbp, fin.driverPayoutGbp]
+    );
+    await assignToOwnDriver(client, orderId, driverId);
+  });
+}
+
 module.exports = {
+  POOL_WINDOW_SECONDS,
+  rejectPoolOrder,
+  findDriversAgain,
+  giveWaitingOrderToOwnDriver,
   releaseOffer,
   cancelOrder,
   releaseToPool,

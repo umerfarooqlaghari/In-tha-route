@@ -86,7 +86,7 @@ async function ensureBackgroundPermission(askedBefore: { current: boolean }): Pr
   const agree = await new Promise<boolean>((resolve) =>
     Alert.alert(
       'Keep sharing your location',
-      'Choose “Allow all the time” / “Always” so restaurants and offers still see where you are when your phone is locked during a delivery. It is only used while you are online.',
+      'Choose “Allow all the time” / “Always” so merchants and offers still see where you are when your phone is locked during a delivery. It is only used while you are online.',
       [
         { text: 'Not now', style: 'cancel', onPress: () => resolve(false) },
         { text: 'Continue', onPress: () => resolve(true) },
@@ -126,7 +126,7 @@ export function useDriverLocation(active: boolean): LatLng | null {
             askedForSettings.current = true;
             Alert.alert(
               'Location is off',
-              'Allow location access so you get offers near you and restaurants can see you on the map.',
+              'Allow location access so you get offers near you and merchants can see you on the map.',
               [
                 { text: 'Not now', style: 'cancel' },
                 { text: 'Open Settings', onPress: () => Linking.openSettings() },

@@ -27,7 +27,7 @@ function partyOf(user) {
   if (user.role === 'driver' && user.driver_id) {
     return { role: 'driver', id: user.driver_id, column: 'driver_id', userId: user.id };
   }
-  throw new AppError(403, 'FORBIDDEN', 'Chat is for restaurants and drivers.');
+  throw new AppError(403, 'FORBIDDEN', 'Chat is for merchants and drivers.');
 }
 
 const toMessage = (row) => ({

@@ -39,6 +39,15 @@ import { pickImage } from '@/utils/pickImage';
 const C = Brand.colors;
 
 export function RestaurantView() {
+  return (
+    <>
+      <RestaurantScreens />
+      <NoDriversPrompt />
+    </>
+  );
+}
+
+function RestaurantScreens() {
   const { activeScreen } = useInThaRoute();
   switch (activeScreen) {
     case 'live_orders':
@@ -55,7 +64,109 @@ export function RestaurantView() {
 }
 
 /* ========================================================================== */
-/* New order — 3 step flow                                                     */
+/* Nobody took an order in time                                                */
+/* ========================================================================== */
+
+/** In the open pool and its time ran out: nobody took it. */
+const isWaiting = (o: LiveOrder) =>
+  o.dispatchType === 'open_platform' && !o.batchId &&
+  (o.status === 'preparing' || o.status === 'ready_for_pickup') &&
+  o.poolSecondsLeft === 0;
+
+/**
+ * An order nobody accepted while it was in the pool leaves the pool. On any screen, the
+ * merchant is asked at once; if they close it, the same choices stay on the order's card.
+ */
+function NoDriversPrompt() {
+  const { orders } = useInThaRoute();
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  // Closed with the cross: it asks again only if the order goes back into the pool and runs out again
+  // (that is a new window, so a new key).
+  const windowKey = (o: LiveOrder) => `${o.id}|${o.poolExpiresAt ?? ''}`;
+  const order = orders.filter(isWaiting).find((o) => !dismissed.includes(windowKey(o))) ?? null;
+  return <NoDriversSheet order={order} onClose={() => order && setDismissed((d) => [...d, windowKey(order)])} />;
+}
+
+/** The choices for an order nobody took: look for drivers again, or give it to one of your own. */
+function NoDriversSheet({ order, onClose }: { order: LiveOrder | null; onClose: () => void }) {
+  const { drivers, restaurants, activeRestaurantId, algorithm, findDriversAgain, assignOrderToOwnDriver } =
+    useInThaRoute();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [pickedDriverId, setPickedDriverId] = useState<string | undefined>();
+
+  const restaurant = restaurants.find((r) => r.id === activeRestaurantId) ?? restaurants[0];
+  // Their own drivers who can take it: online first, and only those with room in their run.
+  const ownDrivers = drivers
+    .filter(
+      (d) =>
+        d.driverType === 'restaurant_own' && d.employerRestaurantId === restaurant?.id &&
+        (d.activeOrders ?? 0) < algorithm.maxBatchSize
+    )
+    .sort((a, b) => Number(!!b.isOnline) - Number(!!a.isOnline));
+  const driverId = ownDrivers.some((d) => d.id === pickedDriverId) ? pickedDriverId : ownDrivers[0]?.id;
+
+  const run = async (key: string, fn: () => Promise<boolean>) => {
+    if (busy) return;
+    setBusy(key);
+    const ok = await fn();
+    setBusy(null);
+    if (ok) onClose();
+  };
+
+  if (!order) return null;
+  return (
+    <Sheet visible onClose={onClose} title="No drivers available right now">
+      <Text style={styles.muted}>
+        {`Nobody accepted ${[order.source, order.externalOrderId].filter(Boolean).join(' ')} in time, so it has left the pool.`}
+      </Text>
+
+      <Card>
+        <Text style={styles.cardTitle}>Look for drivers again</Text>
+        <Text style={styles.muted}>It goes back into the pool for every driver, with a fresh countdown.</Text>
+        <Button
+          label="Find drivers again"
+          icon="refresh"
+          loading={busy === 'find'}
+          disabled={!!busy}
+          onPress={() => run('find', () => findDriversAgain(order.id))}
+        />
+      </Card>
+
+      {ownDrivers.length > 0 && (
+        <Card>
+          <Text style={styles.cardTitle}>Or give it to your driver</Text>
+          {ownDrivers.map((d) => (
+            <ListRow
+              key={d.id}
+              onPress={() => setPickedDriverId(d.id)}
+              left={<Avatar name={d.name} tone="info" size={36} />}
+              title={d.name}
+              subtitle={`${d.isOnline ? 'Online' : 'Offline'} · ${d.activeOrders ?? 0}/${algorithm.maxBatchSize} orders`}
+              right={
+                <Ionicons
+                  name={driverId === d.id ? 'radio-button-on' : 'radio-button-off'}
+                  size={22}
+                  color={driverId === d.id ? C.primary : C.lineStrong}
+                />
+              }
+            />
+          ))}
+          <Button
+            label="Give to this driver"
+            icon="person"
+            variant="dark"
+            loading={busy === 'assign'}
+            disabled={!!busy || !driverId}
+            onPress={() => driverId && run('assign', () => assignOrderToOwnDriver(order.id, driverId))}
+          />
+        </Card>
+      )}
+    </Sheet>
+  );
+}
+
+/* ========================================================================== */
+/* New order — 2 step flow                                                     */
 /* ========================================================================== */
 
 /** Who an order is posted for: the platform pool, one of the restaurant's drivers, or both (hybrid). */
@@ -67,13 +178,13 @@ const defaultDispatch = (policy: DriverPolicy): Dispatch =>
 /** "Your driver" or "Platform driver", for the driver who has an order. */
 const driverKind = (o: LiveOrder) => (o.assignedDriverType === 'restaurant_own' ? 'Your driver' : 'Platform driver');
 
-type Step = 'scan' | 'confirm' | 'prep' | 'done';
-const STEP_INDEX: Record<Step, number> = { scan: 0, confirm: 1, prep: 2, done: 3 };
+type Step = 'scan' | 'confirm' | 'done';
+const STEP_INDEX: Record<Step, number> = { scan: 0, confirm: 1, done: 2 };
 const PREP_OPTIONS = [10, 15, 20, 30, 40];
 
 function StepProgress({ step }: { step: Step }) {
   const idx = STEP_INDEX[step];
-  const labels = ['Scan', 'Confirm', 'Prep time'];
+  const labels = ['Scan', 'Confirm'];
   return (
     <View style={styles.progressWrap}>
       <View style={styles.progressBars}>
@@ -82,7 +193,7 @@ function StepProgress({ step }: { step: Step }) {
         ))}
       </View>
       <Text style={styles.progressText}>
-        Step {Math.min(idx + 1, 3)} of 3 · {labels[Math.min(idx, 2)]}
+        Step {Math.min(idx + 1, 2)} of 2 · {labels[Math.min(idx, 1)]}
       </Text>
     </View>
   );
@@ -337,20 +448,6 @@ function NewOrderScreen() {
               ))}
           </Card>
 
-          <View style={styles.actions}>
-            <Button label="Back" variant="secondary" onPress={() => setStep('scan')} style={styles.flex1} />
-            <Button
-              label="Continue"
-              onPress={() => setStep('prep')}
-              disabled={!address.trim() || !postcode.trim()}
-              style={styles.flex2}
-            />
-          </View>
-        </>
-      )}
-
-      {step === 'prep' && template && (
-        <>
           <Card>
             <Text style={styles.cardTitle}>Ready in</Text>
             <Text style={styles.prepValue}>{prep} min</Text>
@@ -423,13 +520,13 @@ function NewOrderScreen() {
           </Card>
 
           <View style={styles.actions}>
-            <Button label="Back" variant="secondary" onPress={() => setStep('confirm')} style={styles.flex1} />
+            <Button label="Back" variant="secondary" onPress={() => setStep('scan')} style={styles.flex1} />
             <Button
               label="Post order"
               icon="send"
               onPress={post}
               loading={posting}
-              disabled={posting || (dispatch === 'own_driver' && !ownDriverId)}
+              disabled={posting || !address.trim() || !postcode.trim() || (dispatch === 'own_driver' && !ownDriverId)}
               style={styles.flex2}
             />
           </View>
@@ -526,10 +623,15 @@ function orderPins(orders: LiveOrder[]): MapPin[] {
 }
 
 function LiveOrdersScreen() {
-  const { orders, markOrderReady, cancelOrder, setActiveScreen, restaurants, activeRestaurantId } = useInThaRoute();
+  const { orders, drivers, markOrderReady, cancelOrder, findDriversAgain, setActiveScreen, restaurants, activeRestaurantId } =
+    useInThaRoute();
   const { openForOrder } = useChat();
   const [receiptOrder, setReceiptOrder] = useState<LiveOrder | null>(null);
+  const [choiceOrder, setChoiceOrder] = useState<LiveOrder | null>(null);
   const restaurant = restaurants.find((r) => r.id === activeRestaurantId);
+  const hasOwnDrivers = drivers.some(
+    (d) => d.driverType === 'restaurant_own' && d.employerRestaurantId === restaurant?.id
+  );
   const active = useMemo(
     () =>
       orders
@@ -681,6 +783,28 @@ function LiveOrdersScreen() {
                   )}
                 </View>
               )}
+              {/* Nobody took it in time: look again whenever you like, or give it to your own driver. */}
+              {isWaiting(o) && (
+                <View style={styles.orderActions}>
+                  <Button
+                    label="Find drivers again"
+                    icon="refresh"
+                    compact
+                    style={styles.orderAction}
+                    onPress={() => findDriversAgain(o.id)}
+                  />
+                  {hasOwnDrivers && (
+                    <Button
+                      label="My drivers"
+                      icon="person-outline"
+                      compact
+                      variant="secondary"
+                      style={styles.orderAction}
+                      onPress={() => setChoiceOrder(o)}
+                    />
+                  )}
+                </View>
+              )}
               {canCancel(o) && (
                 <Button
                   label="Cancel order"
@@ -695,6 +819,7 @@ function LiveOrdersScreen() {
         })
       )}
       <ReceiptSheet order={receiptOrder} as="restaurant" onClose={() => setReceiptOrder(null)} />
+      <NoDriversSheet order={choiceOrder} onClose={() => setChoiceOrder(null)} />
     </Screen>
   );
 }
@@ -719,6 +844,7 @@ function MyDriversScreen() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
   const [vehicle, setVehicle] = useState<Vehicle>('Motorcycle / Scooter');
   const [plate, setPlate] = useState('');
@@ -726,7 +852,8 @@ function MyDriversScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
-  const canSave = !!name.trim() && !!email.trim() && password.length > 0 && !saving;
+  const canSave =
+    !!name.trim() && !!email.trim() && password.length > 0 && confirmPassword === password && !saving;
 
   // The driver signs in with this email and password; no documents or approval needed.
   const save = async () => {
@@ -751,6 +878,7 @@ function MyDriversScreen() {
     setName('');
     setEmail('');
     setPassword('');
+    setConfirmPassword('');
     setPhone('');
     setPlate('');
     setOpen(false);
@@ -811,6 +939,19 @@ function MyDriversScreen() {
           autoCorrect={false}
           textContentType="newPassword"
           error={errors.password}
+        />
+        <Field
+          label="Confirm password"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          placeholder="Type the password again"
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="off"
+          textContentType="oneTimeCode"
+          error={confirmPassword && confirmPassword !== password ? 'Passwords do not match.' : undefined}
+          success={password && confirmPassword === password ? 'Passwords match' : undefined}
         />
         <Field
           label="Phone"

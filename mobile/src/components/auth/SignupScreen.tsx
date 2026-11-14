@@ -34,6 +34,7 @@ export function SignupScreen({
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [restaurantName, setRestaurantName] = useState('');
   const [address, setAddress] = useState('');
   const [postcode, setPostcode] = useState('');
@@ -56,8 +57,10 @@ export function SignupScreen({
     need('email', email, 'Email');
     need('phone', phone, 'Phone');
     if (!password) e.password = 'Password is required.';
+    if (!confirmPassword) e.confirmPassword = 'Please confirm your password.';
+    else if (password && confirmPassword !== password) e.confirmPassword = 'Passwords do not match.';
     if (isRestaurant) {
-      need('restaurantName', restaurantName, 'Restaurant name');
+      need('restaurantName', restaurantName, 'Merchant name');
       need('address', address, 'Address');
       need('postcode', postcode, 'Postcode');
     } else if (needsPlate) {
@@ -106,7 +109,7 @@ export function SignupScreen({
 
   return (
     <AuthLayout
-      title={isRestaurant ? 'Restaurant sign up' : 'Driver sign up'}
+      title={isRestaurant ? 'Merchant sign up' : 'Driver sign up'}
       subtitle={
         isRestaurant ? undefined : 'Deliver with In Tha Route. Your documents are reviewed before you start.'
       }
@@ -156,12 +159,23 @@ export function SignupScreen({
         {!errors.password && (
           <Text style={styles.help}>At least 8 characters, with a letter and a number.</Text>
         )}
+        <Field
+          label="Confirm password"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          error={errors.confirmPassword}
+          success={password && confirmPassword === password ? 'Passwords match' : undefined}
+          secureTextEntry
+          autoCapitalize="none"
+          autoComplete="off"
+          textContentType="oneTimeCode"
+        />
 
         {isRestaurant ? (
           <>
-            <SectionLabel>Your restaurant</SectionLabel>
+            <SectionLabel>Your merchant</SectionLabel>
             <Field
-              label="Restaurant name"
+              label="Merchant name"
               value={restaurantName}
               onChangeText={setRestaurantName}
               error={errors.restaurantName}

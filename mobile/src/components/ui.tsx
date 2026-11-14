@@ -573,26 +573,55 @@ export function EmptyState({ icon, title, subtitle }: { icon: IconName; title: s
 export function Field({
   label,
   error,
+  success,
+  secureTextEntry,
   ...props
-}: TextInputProps & { label: string; error?: string }) {
+}: TextInputProps & { label: string; error?: string; success?: string }) {
   const revealField = useContext(RevealFieldContext);
+  // A password field has an eye to show what was typed.
+  const [shown, setShown] = useState(false);
+  const input = (
+    <TextInput
+      placeholderTextColor={C.ink3}
+      style={[
+        styles.fieldInput,
+        props.multiline && styles.fieldInputMultiline,
+        !!error && styles.fieldInputError,
+        secureTextEntry && styles.fieldInputWithEye,
+      ]}
+      {...props}
+      secureTextEntry={!!secureTextEntry && !shown}
+      onFocus={(e) => {
+        revealField();
+        props.onFocus?.(e);
+      }}
+    />
+  );
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput
-        placeholderTextColor={C.ink3}
-        style={[
-          styles.fieldInput,
-          props.multiline && styles.fieldInputMultiline,
-          !!error && styles.fieldInputError,
-        ]}
-        {...props}
-        onFocus={(e) => {
-          revealField();
-          props.onFocus?.(e);
-        }}
-      />
+      {secureTextEntry ? (
+        <View>
+          {input}
+          <Pressable
+            style={styles.fieldEye}
+            onPress={() => setShown((v) => !v)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={shown ? 'Hide password' : 'Show password'}>
+            <Ionicons name={shown ? 'eye-off-outline' : 'eye-outline'} size={22} color={C.ink3} />
+          </Pressable>
+        </View>
+      ) : (
+        input
+      )}
       {!!error && <Text style={styles.fieldError}>{error}</Text>}
+      {!error && !!success && (
+        <View style={styles.fieldSuccessRow}>
+          <Ionicons name="checkmark-circle" size={15} color={C.success} />
+          <Text style={styles.fieldSuccess}>{success}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -780,6 +809,10 @@ const styles = StyleSheet.create({
   fieldLabel: { ...Brand.type.captionStrong, color: C.ink2 },
   fieldInputError: { borderWidth: 1, borderColor: C.primary },
   fieldError: { ...Brand.type.caption, color: C.primary },
+  fieldSuccessRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  fieldSuccess: { ...Brand.type.caption, color: C.success },
+  fieldInputWithEye: { paddingRight: 46 },
+  fieldEye: { position: 'absolute', right: 0, top: 0, bottom: 0, width: 46, alignItems: 'center', justifyContent: 'center' },
   fieldInput: {
     height: 50,
     borderRadius: Brand.radius.md,

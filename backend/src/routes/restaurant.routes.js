@@ -17,6 +17,8 @@ router.post('/orders', h(c.createOrder)); // post an order
 router.get('/orders/:id/receipt', h(c.orderReceipt)); // the scanned receipt photo
 router.post('/orders/:id/ready', h(c.markOrderReady)); // "Mark ready"
 router.post('/orders/:id/cancel', h(c.cancelOrder)); // before the driver collects it
+router.post('/orders/:id/find-drivers', h(c.findDriversAgain)); // nobody took it: back into the pool
+router.post('/orders/:id/assign-driver', h(c.assignOwnDriver)); // nobody took it: give it to my driver
 router.post('/drivers', h(c.addDriver)); // add an in-house driver
 router.patch('/policy', h(c.updatePolicy)); // delivery settings
 

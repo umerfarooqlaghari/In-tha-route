@@ -206,7 +206,7 @@ async function orderRemovedFromRun(order, kind) {
     cancelled: ['Order cancelled', `${ref(order)} was cancelled. Do not collect it.`],
     cancelled_collected: [
       'Order cancelled',
-      `${ref(order)} was cancelled by In Tha Route. Do not deliver it; message the restaurant about the food.`,
+      `${ref(order)} was cancelled by In Tha Route. Do not deliver it; message the merchant about the food.`,
     ],
     released: ['Order moved', `${ref(order)} was given to another driver. Do not collect it.`],
   }[kind];

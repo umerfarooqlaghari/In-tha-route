@@ -18,18 +18,18 @@ appId: host.exp.Exponent
     visible: "Batch simulator"
     timeout: 15000
 - assertVisible:
-    id: "restaurant-fee-value"
+    id: "merchant-fee-value"
     text: "£5.00"
 - tapOn:
-    id: "restaurant-fee-plus"
+    id: "merchant-fee-plus"
 - tapOn:
-    id: "restaurant-fee-plus"
+    id: "merchant-fee-plus"
 - extendedWaitUntil:
     visible:
-      id: "restaurant-fee-value"
+      id: "merchant-fee-value"
       text: "£5.50"
     timeout: 10000
-# 2 orders: restaurants pay 2 x 5.50
+# 2 orders: merchants pay 2 x 5.50
 - tapOn: "2"
 - extendedWaitUntil:
     visible: "£11.00"
@@ -55,10 +55,10 @@ appId: host.exp.Exponent
       text: "3.5 mi"
     timeout: 10000
 - tapOn:
-    id: "extra-mile-restaurant-plus"
+    id: "extra-mile-merchant-plus"
 - extendedWaitUntil:
     visible:
-      id: "extra-mile-restaurant-value"
+      id: "extra-mile-merchant-value"
       text: "£1.30"
     timeout: 10000
 # Saved on the server

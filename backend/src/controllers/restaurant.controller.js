@@ -145,6 +145,19 @@ async function cancelOrder(req, res) {
   res.json({ dashboard: await buildDashboard(req.user) });
 }
 
+/** "Find drivers again": an order nobody took goes back into the pool. */
+async function findDriversAgain(req, res) {
+  await orders.findDriversAgain(req.user.restaurant_id, parse(v.uuidSchema, req.params.id));
+  res.json({ dashboard: await buildDashboard(req.user) });
+}
+
+/** An order nobody took is given to one of the restaurant's own drivers. */
+async function assignOwnDriver(req, res) {
+  const { ownDriverId } = parse(v.assignDriverSchema, req.body || {});
+  await orders.assignWaitingToOwnDriver(req.user.restaurant_id, parse(v.uuidSchema, req.params.id), ownDriverId);
+  res.json({ dashboard: await buildDashboard(req.user) });
+}
+
 async function addDriver(req, res) {
   const data = parse(v.addOwnDriverSchema, req.body);
   await drivers.createOwnDriver(req.user.restaurant_id, data);
@@ -164,6 +177,8 @@ module.exports = {
   orderReceipt,
   markOrderReady,
   cancelOrder,
+  findDriversAgain,
+  assignOwnDriver,
   addDriver,
   updatePolicy,
 };

@@ -106,6 +106,7 @@ const historySchema = z.object({
 const rejectSchema = z.object({ reason: z.string().trim().max(300).optional() });
 const cancelSchema = z.object({ reason: z.string().trim().max(300).default('') });
 const uuidSchema = z.uuid('Invalid id.');
+const assignDriverSchema = z.object({ ownDriverId: z.uuid('Choose one of your drivers.') });
 
 module.exports = {
   imageSchema,
@@ -119,4 +120,5 @@ module.exports = {
   rejectSchema,
   cancelSchema,
   uuidSchema,
+  assignDriverSchema,
 };

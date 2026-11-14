@@ -115,6 +115,10 @@ export interface LiveOrder {
   platformMarginGbp?: number;
   /** Order pool only: what this order would pay the driver if added now. */
   nextPayoutGbp?: number;
+  /** In the pool: seconds left before it leaves the pool (0: nobody took it in time). Counts down locally. */
+  poolSecondsLeft?: number;
+  /** Which pool window this is; it changes each time the order goes back into the pool. */
+  poolExpiresAt?: string;
   /** Restaurant and admin: nobody has taken it yet, or the delivery is running late. */
   attention?: 'no_driver' | 'late_delivery';
   /** The photo of the scanned receipt was kept and can be opened (a driver: only for orders in their run). */
@@ -275,7 +279,7 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
   driver: [
     { key: 'live_route', title: 'Drive', subtitle: 'Offers & navigation', icon: 'navigate-outline' },
     { key: 'open_pool', title: 'Order pool', subtitle: 'Orders near you · first to accept', icon: 'layers-outline' },
-    { key: 'messages', title: 'Messages', subtitle: 'Chats with restaurants', icon: 'chatbubbles-outline' },
+    { key: 'messages', title: 'Messages', subtitle: 'Chats with merchants', icon: 'chatbubbles-outline' },
     { key: 'earnings', title: 'Earnings', subtitle: 'Payouts & trips', icon: 'wallet-outline' },
     { key: 'order_history', title: 'Past orders', subtitle: 'Deliveries & pay', icon: 'receipt-outline' },
     { key: 'kyc_docs', title: 'Documents', subtitle: 'Licence, insurance & ID', icon: 'document-text-outline' },
@@ -284,7 +288,7 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
     { key: 'live_ledger', title: 'Overview', subtitle: 'Live map & revenue', icon: 'map-outline' },
     { key: 'pricing_algorithm', title: 'Pricing', subtitle: 'Fees & batch payouts', icon: 'calculator-outline' },
     { key: 'driver_kyc', title: 'Drivers', subtitle: 'Approve & contract', icon: 'shield-checkmark-outline' },
-    { key: 'partner_restaurants', title: 'Restaurants', subtitle: 'Partners & policies', icon: 'storefront-outline' },
+    { key: 'partner_restaurants', title: 'Merchants', subtitle: 'Partners & policies', icon: 'storefront-outline' },
   ],
 };
 
@@ -370,6 +374,8 @@ interface InThaRouteContextType {
   /** "Find new orders" / "Refresh": closes a finished run and asks for the next offer. */
   findNewOrders: () => Promise<boolean>;
   appendOrderToDriverBatch: (orderId: string) => Promise<{ ok: boolean; message: string }>;
+  /** Driver: remove a pool order from my pool only. */
+  rejectPoolOrder: (orderId: string) => Promise<boolean>;
   uploadDriverKycDoc: (docId: string, image: PickedImage) => Promise<boolean>;
 
   // Restaurant
@@ -386,6 +392,10 @@ interface InThaRouteContextType {
     customNote?: string;
   }) => Promise<LiveOrder | null>;
   markOrderReady: (orderId: string) => Promise<boolean>;
+  /** Restaurant: an order nobody took goes back into the pool for a new window. */
+  findDriversAgain: (orderId: string) => Promise<boolean>;
+  /** Restaurant: an order nobody took is given to one of its own drivers. */
+  assignOrderToOwnDriver: (orderId: string, driverId: string) => Promise<boolean>;
   /** Restaurant or admin: cancel an order the driver has not collected yet. */
   cancelOrder: (orderId: string, reason?: string) => Promise<boolean>;
   /** Admin: take an order off its driver and offer it to other drivers. */
@@ -598,7 +608,13 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
     if (!data) return [];
     const elapsed = Math.max(0, Math.floor((now - dash.receivedAt) / 1000));
     return data.orders.map((o) =>
-      o.status === 'delivered' ? o : { ...o, remainingSeconds: Math.max(0, o.remainingSeconds - elapsed) }
+      o.status === 'delivered'
+        ? o
+        : {
+            ...o,
+            remainingSeconds: Math.max(0, o.remainingSeconds - elapsed),
+            poolSecondsLeft: o.poolSecondsLeft === undefined ? undefined : Math.max(0, o.poolSecondsLeft - elapsed),
+          }
     );
   }, [data, dash.receivedAt, now]);
 
@@ -669,6 +685,8 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
+  const rejectPoolOrder = (orderId: string) => attempt(() => call('POST', `/api/driver/pool/${orderId}/reject`));
+
   const uploadDriverKycDoc = (docId: string, image: PickedImage) =>
     attempt(() =>
       call('POST', `/api/driver/documents/${docId}/upload`, {
@@ -727,6 +745,12 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
       return null;
     }
   };
+
+  const findDriversAgain = (orderId: string) =>
+    attempt(() => call('POST', `/api/restaurant/orders/${orderId}/find-drivers`));
+
+  const assignOrderToOwnDriver = (orderId: string, driverId: string) =>
+    attempt(() => call('POST', `/api/restaurant/orders/${orderId}/assign-driver`, { ownDriverId: driverId }));
 
   const markOrderReady = (orderId: string) =>
     attempt(() => call('POST', `/api/restaurant/orders/${orderId}/ready`));
@@ -841,6 +865,9 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         advanceActiveStop,
         findNewOrders,
         appendOrderToDriverBatch,
+        rejectPoolOrder,
+        findDriversAgain,
+        assignOrderToOwnDriver,
         uploadDriverKycDoc,
         scanReceipt,
         publishScannedOrder,

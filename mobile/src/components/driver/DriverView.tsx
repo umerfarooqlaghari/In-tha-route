@@ -107,6 +107,9 @@ function useBusy() {
   return { busy, run };
 }
 
+/** An order whose time in the pool has run out is gone from every driver's pool at once. */
+const stillInPool = (o: LiveOrder) => o.poolSecondsLeft === undefined || o.poolSecondsLeft > 0;
+
 const shortArea = (address: string) => {
   const parts = address.split(',').map((p) => p.trim());
   return parts[parts.length - 1] || address;
@@ -149,7 +152,7 @@ function DriveScreen() {
   const driverPos: LatLng =
     myLocation ?? (navigating && stopIndex > 0 ? stops[stopIndex - 1].coordinate : DRIVER_START);
   const poolCount = orders.filter(
-    (o) => !o.batchId && o.status !== 'delivered' && o.dispatchType === 'open_platform'
+    (o) => !o.batchId && o.status !== 'delivered' && o.dispatchType === 'open_platform' && stillInPool(o)
   ).length;
 
   const pins: MapPin[] = useMemo(() => {
@@ -479,7 +482,7 @@ function SearchingRow({ poolCount }: { poolCount: number }) {
 /* ========================================================================== */
 
 function OrderPoolScreen() {
-  const { orders, algorithm, appendOrderToDriverBatch, setActiveScreen, myLocation, capacity, me } =
+  const { orders, algorithm, appendOrderToDriverBatch, rejectPoolOrder, setActiveScreen, myLocation, capacity, me } =
     useInThaRoute();
   // In-house drivers see their own restaurant's hybrid orders here, with no platform pay.
   const inHouse = me?.driverType === 'restaurant_own';
@@ -488,7 +491,7 @@ function OrderPoolScreen() {
 
   // The server sends only orders this driver can take: near them, while they have room.
   const pool = orders.filter(
-    (o) => !o.batchId && o.status !== 'delivered' && o.dispatchType === 'open_platform'
+    (o) => !o.batchId && o.status !== 'delivered' && o.dispatchType === 'open_platform' && stillInPool(o)
   );
   const maxOrders = capacity?.maxOrders ?? algorithm.maxBatchSize;
   const activeOrders = capacity?.activeOrders ?? 0;
@@ -577,7 +580,7 @@ function OrderPoolScreen() {
                   <SourceBadge source={o.source} />
                 </View>
                 {inHouse ? (
-                  <Badge label="Your restaurant" tone="info" />
+                  <Badge label="Your merchant" tone="info" />
                 ) : (
                   <Text style={styles.earn}>+{formatGbp(pay)}</Text>
                 )}
@@ -590,12 +593,30 @@ function OrderPoolScreen() {
                   To {shortArea(o.deliveryAddress)} · {o.postcode}
                 </Text>
               </View>
+              {o.poolSecondsLeft !== undefined && (
+                <View style={styles.rowGapShrink}>
+                  <Ionicons name="timer-outline" size={16} color={o.poolSecondsLeft <= 30 ? C.primary : C.ink3} />
+                  <Text style={[styles.poolTimer, o.poolSecondsLeft <= 30 && styles.poolTimerLow]} numberOfLines={1}>
+                    {`Leaves the pool in ${formatCountdown(o.poolSecondsLeft)}`}
+                  </Text>
+                </View>
+              )}
               <Divider />
-              <View style={styles.rowBetween}>
-                <Text style={styles.poolMeta} numberOfLines={1}>
-                  {o.distanceMiles} mi ·{' '}
-                  {o.remainingSeconds > 0 ? `Ready ${formatCountdown(o.remainingSeconds)}` : 'Ready'}
-                </Text>
+              <Text style={styles.poolMeta} numberOfLines={1}>
+                {o.distanceMiles} mi ·{' '}
+                {o.remainingSeconds > 0 ? `Ready ${formatCountdown(o.remainingSeconds)}` : 'Ready'}
+              </Text>
+              <View style={styles.poolActions}>
+                <Button
+                  label="Reject"
+                  icon="close"
+                  variant="secondary"
+                  compact
+                  loading={busy === `reject-${o.id}`}
+                  disabled={!!busy}
+                  onPress={() => run(`reject-${o.id}`, () => rejectPoolOrder(o.id))}
+                  style={styles.poolAction}
+                />
                 <Button
                   label="Accept"
                   icon="checkmark"
@@ -603,6 +624,7 @@ function OrderPoolScreen() {
                   loading={busy === o.id}
                   disabled={full || !!busy}
                   onPress={() => add(o.id)}
+                  style={styles.poolAction}
                 />
               </View>
             </Card>
@@ -836,7 +858,7 @@ function PastOrdersScreen() {
         {selected && (
           <>
             <View style={styles.center}>
-              <Text style={styles.muted}>{paidByRestaurant(selected) ? 'Paid by restaurant' : 'You earned'}</Text>
+              <Text style={styles.muted}>{paidByRestaurant(selected) ? 'Paid by merchant' : 'You earned'}</Text>
               <Text style={styles.payout}>
                 {paidByRestaurant(selected) ? '—' : formatGbp(selected.payoutGbp)}
               </Text>
@@ -1132,6 +1154,10 @@ const styles = StyleSheet.create({
     backgroundColor: C.primarySoft,
   },
   poolNudgeText: { ...Brand.type.captionStrong, color: C.ink, flexShrink: 1 },
+  poolTimer: { ...Brand.type.captionStrong, color: C.ink3, fontVariant: ['tabular-nums'] },
+  poolTimerLow: { color: C.primary },
+  poolActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  poolAction: { flex: 1 },
   poolMeta: { fontSize: 17, fontWeight: '600', color: C.ink, flexShrink: 1, fontVariant: ['tabular-nums'] },
   earn: { ...Brand.type.heading, color: C.success },
   toast: {

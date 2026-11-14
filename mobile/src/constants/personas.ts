@@ -13,11 +13,11 @@ export interface Persona {
 export const PERSONAS: Record<UserRole, Persona> = {
   restaurant: {
     role: 'restaurant',
-    label: 'Restaurant',
+    label: 'Merchant',
     tagline: 'Post orders from receipts',
     icon: 'storefront-outline',
     name: 'Saffron Richmond',
-    org: 'Restaurant staff',
+    org: 'Merchant staff',
     email: 'staff@saffronrichmond.co.uk',
   },
   driver: {

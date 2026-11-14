@@ -35,7 +35,7 @@ appId: host.exp.Exponent
 - assertVisible: "First driver to accept an order gets it."
 - tapOn: "Accept"
 - extendedWaitUntil:
-    visible: "Order accepted. Head to the restaurant."
+    visible: "Order accepted. Head to the merchant."
     timeout: 15000
 - assertVisible: "1 / 5 orders"
 - runFlow:

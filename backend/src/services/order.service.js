@@ -43,6 +43,10 @@ function attentionOf(row, now = new Date()) {
   return undefined;
 }
 
+/** Waiting in the open pool for a driver. */
+const inPool = (row) =>
+  row.dispatch_type === 'open_platform' && !row.batch_id && ['preparing', 'ready_for_pickup'].includes(row.status);
+
 const coordsOf = (lat, lng) => (lat != null && lng != null ? { latitude: lat, longitude: lng } : null);
 
 /**
@@ -97,6 +101,10 @@ function toLiveOrder(row, { view, now = new Date(), maskDelivered = false, nextP
     platformMarginGbp: view === 'admin' ? pricing.round2(fee - payout) : 0,
     nextPayoutGbp,
     attention: view === 'restaurant' || view === 'admin' ? attentionOf(row, now) : undefined,
+    // Seconds left in the pool before the order leaves it (0: nobody took it in time).
+    // Which window this is: it changes each time the order goes back into the pool.
+    poolExpiresAt: inPool(row) && row.pool_expires_at ? row.pool_expires_at : undefined,
+    poolSecondsLeft: inPool(row) && row.pool_expires_at ? Math.max(0, Math.ceil((row.pool_expires_at - now) / 1000)) : undefined,
     // The scanned receipt photo. A driver gets it for the orders in their run, never in the pool.
     hasReceipt: pool ? undefined : Boolean(row.receipt_file_id),
     createdAtLabel: timeAgo(row.created_at, now),
@@ -148,6 +156,7 @@ async function listPool(driverRow, config) {
     `${ORDER_SELECT}
       WHERE o.batch_id IS NULL AND o.dispatch_type = 'open_platform'
         AND o.status IN ('preparing', 'ready_for_pickup')
+        AND (o.pool_expires_at IS NULL OR o.pool_expires_at > now())
         AND ($3::uuid IS NULL OR (o.hybrid AND o.restaurant_id = $3))
         AND NOT EXISTS (
               SELECT 1 FROM batch_declines x
@@ -317,9 +326,11 @@ async function createOrder(user, input) {
          restaurant_id, source, external_order_id, customer_name, customer_phone, phone_access_code,
          direct_customer_phone, delivery_address, postcode, delivery_instructions, restaurant_pickup_note,
          distance_miles, dropoff_latitude, dropoff_longitude, prep_minutes, ready_at, order_total_gbp,
-         items, dispatch_type, status, restaurant_fee_gbp, driver_payout_gbp, created_by, receipt_file_id, hybrid)
+         items, dispatch_type, status, restaurant_fee_gbp, driver_payout_gbp, created_by, receipt_file_id, hybrid,
+         pool_expires_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-               now() + make_interval(mins => $15), $16, $17, $18, 'preparing', $19, $20, $21, $22, $23)
+               now() + make_interval(mins => $15), $16, $17, $18, 'preparing', $19, $20, $21, $22, $23,
+               CASE WHEN $18 = 'open_platform' THEN now() + make_interval(secs => $24) ELSE NULL END)
        RETURNING id`,
       [
         restaurant.id,
@@ -345,6 +356,7 @@ async function createOrder(user, input) {
         user.id,
         receiptFileId,
         hybrid,
+        dispatch.POOL_WINDOW_SECONDS,
       ]
     );
     if (input.dispatchType === 'own_driver') {
@@ -360,6 +372,18 @@ async function createOrder(user, input) {
 
   const { rows } = await db.query(`${ORDER_SELECT} WHERE o.id = $1`, [orderId]);
   return toLiveOrder(rows[0], { view: 'restaurant' });
+}
+
+/** The merchant asks for drivers again: the order goes back to everyone for a new window. */
+async function findDriversAgain(restaurantId, orderId) {
+  await dispatch.findDriversAgain(restaurantId, orderId);
+  push.later(() => dispatch.notifyNearbyDrivers(orderId));
+}
+
+/** An order nobody took goes to one of the merchant's own drivers instead. */
+async function assignWaitingToOwnDriver(restaurantId, orderId, driverId) {
+  await dispatch.giveWaitingOrderToOwnDriver(restaurantId, orderId, driverId);
+  push.later(() => push.ownDriverAssigned(orderId));
 }
 
 /** The kitchen says the food is ready now: the countdown drops to zero. */
@@ -424,6 +448,8 @@ async function sendAttentionAlerts() {
 }
 
 module.exports = {
+  findDriversAgain,
+  assignWaitingToOwnDriver,
   NO_DRIVER_ALERT_MINUTES,
   LATE_DELIVERY_MINUTES,
   cancelForRestaurant,

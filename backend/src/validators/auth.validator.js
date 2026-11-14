@@ -44,10 +44,10 @@ const restaurantSignupSchema = z.object({
   ...base,
   role: z.literal(ROLES.RESTAURANT),
   restaurantName: z
-    .string({ error: 'Restaurant name is required.' })
+    .string({ error: 'Merchant name is required.' })
     .trim()
-    .min(2, 'Restaurant name must be at least 2 characters.')
-    .max(120, 'Restaurant name is too long.'),
+    .min(2, 'Merchant name must be at least 2 characters.')
+    .max(120, 'Merchant name is too long.'),
   address: z
     .string({ error: 'Address is required.' })
     .trim()

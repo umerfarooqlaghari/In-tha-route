@@ -63,7 +63,7 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "In Tha Route shows your position on the map and offers you orders near you while you are online.",
-          "locationAlwaysAndWhenInUsePermission": "While you are online or on a delivery, In Tha Route keeps sharing your position when the phone is locked, so restaurants know when you will arrive and you get offers near you.",
+          "locationAlwaysAndWhenInUsePermission": "While you are online or on a delivery, In Tha Route keeps sharing your position when the phone is locked, so merchants know when you will arrive and you get offers near you.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true

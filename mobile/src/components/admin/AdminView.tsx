@@ -92,7 +92,7 @@ function OverviewScreen() {
         <View style={styles.mapFooter}>
           <View style={styles.legend}>
             <View style={[styles.legendDot, { backgroundColor: C.ink }]} />
-            <Text style={styles.muted}>Restaurants</Text>
+            <Text style={styles.muted}>Merchants</Text>
           </View>
           <View style={styles.legend}>
             <View style={[styles.legendDot, { backgroundColor: C.primary }]} />
@@ -198,7 +198,7 @@ function OrderControls({
       `Cancel ${ref}?`,
       collected
         ? `${driver ?? 'The driver'} already has the food and will be told not to deliver it. The fee and driver pay for this trip stay.`
-        : 'The restaurant and driver are told. The restaurant is not charged.',
+        : 'The merchant and driver are told. The merchant is not charged.',
       [
       { text: 'Keep order', style: 'cancel' },
         { text: 'Cancel order', style: 'destructive', onPress: () => void onCancel(o.id) },
@@ -306,7 +306,7 @@ function PricingScreen() {
 
         <View style={styles.gap10}>
           <View style={styles.rowBetween}>
-            <Text style={styles.cardBody}>Restaurants pay</Text>
+            <Text style={styles.cardBody}>Merchants pay</Text>
             <Text style={styles.cardTitle}>{formatGbp(restaurantsPay)}</Text>
           </View>
           <View style={styles.rowBetween}>
@@ -331,11 +331,11 @@ function PricingScreen() {
       <Card>
         <View style={styles.settingRow}>
           <View style={styles.flexText}>
-            <Text style={styles.cardTitle}>Restaurant fee</Text>
+            <Text style={styles.cardTitle}>Merchant fee</Text>
             <Text style={styles.muted}>Per order</Text>
           </View>
           <Stepper
-            name="Restaurant fee"
+            name="Merchant fee"
             value={formatGbp(algorithm.baseRestaurantChargeGbp)}
             onDecrement={() => setFee(-0.25)}
             onIncrement={() => setFee(0.25)}
@@ -357,11 +357,11 @@ function PricingScreen() {
         <Divider />
         <View style={styles.settingRow}>
           <View style={styles.flexText}>
-            <Text style={styles.cardTitle}>Extra mile · restaurant</Text>
+            <Text style={styles.cardTitle}>Extra mile · merchant</Text>
             <Text style={styles.muted}>Charged per mile beyond</Text>
           </View>
           <Stepper
-            name="Extra mile restaurant"
+            name="Extra mile merchant"
             value={formatGbp(algorithm.extraMileRestaurantChargeGbp)}
             onDecrement={() => nudge('extraMileRestaurantChargeGbp', -0.05, 0, 10)}
             onIncrement={() => nudge('extraMileRestaurantChargeGbp', 0.05, 0, 10)}

@@ -17,10 +17,9 @@ appId: host.exp.Exponent
 - assertVisible: "Emma Wilson"
 - assertVisible: ".*Rosemont.*"
 - assertVisible: ".*TW10 6QN.*"
-- tapOn: "Continue"
-- extendedWaitUntil:
-    visible: "Who delivers?"
-    timeout: 10000
+# Prep time and who delivers are on the same screen, below the items.
+- scrollUntilVisible:
+    element: "Who delivers?"
 - tapOn: "Platform driver"
 - assertVisible: "Delivery fee"
 - tapOn: "Post order"
