@@ -5,6 +5,9 @@ const AppError = require('../utils/AppError');
 const { SIGNUP_SCHEMAS, loginSchema, refreshSchema } = require('../validators/auth.validator');
 const { parse } = require('../middleware/validate');
 const push = require('../services/push.service');
+const db = require('../config/db');
+const drivers = require('../services/driver.service');
+const dispatch = require('../services/dispatch.service');
 const { z } = require('zod');
 
 const pushTokenSchema = z.object({
@@ -40,8 +43,26 @@ async function refresh(req, res) {
 
 async function logout(req, res) {
   const { refreshToken } = parse(refreshSchema, req.body);
-  await authService.logout(refreshToken);
+  const userId = await authService.logout(refreshToken);
+  if (userId) await goOffline(userId);
   res.status(204).end();
+}
+
+/**
+ * A driver who signs out is no longer online: merchants and admins stop seeing them as
+ * "Online", and an offer waiting for them goes to the next driver.
+ */
+async function goOffline(userId) {
+  const { rows } = await db.query(
+    `SELECT id FROM driver_profiles WHERE user_id = $1 AND status = 'approved_online'`,
+    [userId]
+  );
+  if (!rows[0]) return;
+  await drivers.setOnline(rows[0].id, false);
+  const released = await dispatch.releaseOffer(rows[0].id);
+  push.later(async () => {
+    for (const id of released) await dispatch.notifyNearbyDrivers(id);
+  });
 }
 
 async function me(req, res) {

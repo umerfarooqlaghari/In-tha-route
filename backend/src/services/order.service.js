@@ -1,6 +1,6 @@
 const db = require('../config/db');
 const AppError = require('../utils/AppError');
-const { timeAgo } = require('../utils/labels');
+const { timeAgo, tripTimeLabel } = require('../utils/labels');
 const dispatch = require('./dispatch.service');
 const files = require('./file.service');
 const geo = require('./geo.service');
@@ -123,6 +123,45 @@ async function listLiveForRestaurant(restaurantId) {
 }
 
 /** Everything still in progress plus what was delivered today (UK time). */
+/**
+ * A merchant's delivered orders, newest first, with times and money.
+ * `before` (ISO time of the last row shown) loads the next page.
+ */
+async function historyForRestaurant(restaurantId, { before, limit = 30 } = {}) {
+  const now = new Date();
+  const [page, totals] = await Promise.all([
+    db.query(
+      `${ORDER_SELECT} WHERE o.restaurant_id = $1 AND o.status = 'delivered'
+          AND ($2::timestamptz IS NULL OR o.delivered_at < $2)
+        ORDER BY o.delivered_at DESC LIMIT $3`,
+      [restaurantId, before || null, limit]
+    ),
+    db.query(
+      `SELECT count(*)::int AS orders, coalesce(sum(order_total_gbp), 0) AS sales,
+              coalesce(sum(restaurant_fee_gbp), 0) AS fees
+         FROM orders WHERE restaurant_id = $1 AND status = 'delivered'`,
+      [restaurantId]
+    ),
+  ]);
+  const minutesBetween = (a, b) => (a && b ? Math.max(1, Math.round((new Date(b) - new Date(a)) / 60000)) : null);
+  const orders = page.rows.map((row) => ({
+    ...toLiveOrder(row, { view: 'restaurant', now }),
+    createdAt: new Date(row.created_at).toISOString(),
+    pickedUpAt: row.picked_up_at ? new Date(row.picked_up_at).toISOString() : null,
+    deliveredAt: new Date(row.delivered_at).toISOString(),
+    deliveredLabel: tripTimeLabel(row.delivered_at, now),
+    // Posted -> delivered, and collected -> delivered.
+    totalMinutes: minutesBetween(row.created_at, row.delivered_at),
+    deliveryMinutes: minutesBetween(row.picked_up_at, row.delivered_at),
+  }));
+  const t = totals.rows[0];
+  return {
+    orders,
+    totals: { orders: t.orders, salesGbp: Number(t.sales), feesGbp: Number(t.fees) },
+    nextBefore: page.rows.length === limit ? orders[orders.length - 1].deliveredAt : null,
+  };
+}
+
 async function listForAdmin() {
   const { rows } = await db.query(
     `${ORDER_SELECT}
@@ -209,7 +248,7 @@ async function rejectDuplicate(client, restaurantId, input) {
   const ref = String(input.externalOrderId || '').trim();
   if (!ref) return;
   const { rows } = await client.query(
-    `SELECT created_at FROM orders
+    `SELECT status FROM orders
       WHERE restaurant_id = $1 AND source = $2 AND external_order_id = $3 AND status <> 'cancelled'
         AND created_at > now() - make_interval(hours => $4)
       ORDER BY created_at DESC LIMIT 1`,
@@ -219,7 +258,7 @@ async function rejectDuplicate(client, restaurantId, input) {
     throw new AppError(
       409,
       'DUPLICATE_ORDER',
-      `${input.source} order ${ref} was already posted ${timeAgo(rows[0].created_at).toLowerCase()}. Cancel that one first if you need to post it again.`
+      rows[0].status === 'delivered' ? 'This order has already been delivered.' : 'This order is already live.'
     );
   }
 }
@@ -458,6 +497,7 @@ module.exports = {
   sendAttentionAlerts,
   toLiveOrder,
   listLiveForRestaurant,
+  historyForRestaurant,
   listForAdmin,
   listBatch,
   listPool,

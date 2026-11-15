@@ -1,4 +1,5 @@
 const { parse } = require('../middleware/validate');
+const analytics = require('../services/analytics.service');
 const drivers = require('../services/driver.service');
 const files = require('../services/file.service');
 const geo = require('../services/geo.service');
@@ -170,8 +171,22 @@ async function updatePolicy(req, res) {
   res.json({ dashboard: await buildDashboard(req.user) });
 }
 
+/** Delivered orders, newest first. */
+async function orderHistory(req, res) {
+  const { before, limit } = parse(v.historySchema, req.query);
+  res.json(await orders.historyForRestaurant(req.user.restaurant_id, { before, limit }));
+}
+
+/** Sales, orders and timings for the last 7, 30 or 90 days. */
+async function orderAnalytics(req, res) {
+  const { days } = parse(v.analyticsSchema, req.query);
+  res.json(await analytics.forRestaurant(req.user.restaurant_id, days));
+}
+
 module.exports = {
   dashboard,
+  orderHistory,
+  orderAnalytics,
   scanReceipt,
   createOrder,
   orderReceipt,

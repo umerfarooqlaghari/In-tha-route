@@ -103,6 +103,10 @@ const historySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(30),
 });
 
+const analyticsSchema = z.object({
+  days: z.coerce.number().int().refine((d) => [7, 30, 90].includes(d), 'Choose 7, 30 or 90 days.').default(7),
+});
+
 const rejectSchema = z.object({ reason: z.string().trim().max(300).optional() });
 const cancelSchema = z.object({ reason: z.string().trim().max(300).default('') });
 const uuidSchema = z.uuid('Invalid id.');
@@ -117,6 +121,7 @@ module.exports = {
   pricingSchema,
   locationSchema,
   historySchema,
+  analyticsSchema,
   rejectSchema,
   cancelSchema,
   uuidSchema,

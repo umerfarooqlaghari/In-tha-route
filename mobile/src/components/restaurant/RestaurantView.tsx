@@ -33,6 +33,7 @@ import {
   Vehicle,
 } from '@/context/InThaRouteContext';
 import { InboxScreen } from '@/components/chat/Chat';
+import { AnalyticsScreen, PastOrdersScreen } from '@/components/restaurant/MerchantInsights';
 import { useChat } from '@/context/ChatContext';
 import { pickImage } from '@/utils/pickImage';
 
@@ -56,6 +57,10 @@ function RestaurantScreens() {
       return <MyDriversScreen />;
     case 'messages':
       return <InboxScreen />;
+    case 'past_orders':
+      return <PastOrdersScreen />;
+    case 'analytics':
+      return <AnalyticsScreen />;
     case 'dispatch_policy':
       return <DeliverySettingsScreen />;
     default:

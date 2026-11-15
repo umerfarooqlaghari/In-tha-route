@@ -36,8 +36,12 @@ appId: host.exp.Exponent
       id: "chat-input"
       text: "Please use the side door"
     timeout: 90000
+# The keyboard can still be sliding up, which moves the send button: let it finish first.
+- waitForAnimationToEnd:
+    timeout: 5000
 - tapOn:
     id: "chat-send"
+    retryTapIfNoChange: true
 # Sent: the box empties and the bubble shows.
 - extendedWaitUntil:
     notVisible:
@@ -73,8 +77,12 @@ appId: host.exp.Exponent
       id: "chat-input"
       text: "On my way"
     timeout: 90000
+# The keyboard can still be sliding up, which moves the send button: let it finish first.
+- waitForAnimationToEnd:
+    timeout: 5000
 - tapOn:
     id: "chat-send"
+    retryTapIfNoChange: true
 # Sent: the box empties and the bubble shows.
 - extendedWaitUntil:
     notVisible:

@@ -28,7 +28,8 @@ import { InboxScreen } from '@/components/chat/Chat';
 import { showPhone, useChat } from '@/context/ChatContext';
 import { api } from '@/services/apiClient';
 import { errorMessage } from '@/context/InThaRouteContext';
-import { chooseImage } from '@/utils/pickImage';
+import { UploadedFile } from '@/components/UploadedFile';
+import { chooseDocument } from '@/utils/pickImage';
 import { decodePolyline } from '@/utils/polyline';
 
 const C = Brand.colors;
@@ -944,7 +945,7 @@ function DocumentsScreen() {
     : 'Under review';
 
   const upload = async (doc: KycDocument) => {
-    const image = await chooseImage(cleanTitle(doc.title));
+    const image = await chooseDocument(cleanTitle(doc.title));
     if (!image) return;
     setUploading(true);
     const ok = await uploadDriverKycDoc(doc.id, image);
@@ -1011,12 +1012,15 @@ function DocumentsScreen() {
                 {openDoc.subtitle}
               </Text>
             </Card>
+            {openDoc.hasFile && (
+              <UploadedFile doc={openDoc} path={`/api/driver/documents/${openDoc.id}/file`} />
+            )}
             {openDoc.status !== 'verified' && (
               <Text style={styles.muted}>{openDoc.updatedAt}</Text>
             )}
             <Button
-              label={openDoc.hasFile ? 'Upload new photo' : 'Upload photo'}
-              icon="camera-outline"
+              label={openDoc.hasFile ? 'Upload new document, PDF or photo' : 'Upload document, PDF or photo'}
+              icon="cloud-upload-outline"
               loading={uploading}
               disabled={uploading}
               onPress={() => upload(openDoc)}

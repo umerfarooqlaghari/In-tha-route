@@ -292,7 +292,15 @@ describe('duplicate orders', () => {
     assert.deepEqual(results.map((r) => r.status).sort(), [201, 409, 409]);
     const dup = results.find((r) => r.status === 409);
     assert.equal(dup.body.error.code, 'DUPLICATE_ORDER');
-    assert.match(dup.body.error.message, /Deliveroo order #DUP1 was already posted just now/);
+    assert.equal(dup.body.error.message, 'This order is already live.');
+  });
+
+  test('a receipt whose order was delivered says so', async () => {
+    assert.equal((await post('#DUP2')).status, 201);
+    await pool.query(`UPDATE orders SET status = 'delivered', delivered_at = now() WHERE external_order_id = '#DUP2'`);
+    const again = await post('#DUP2');
+    assert.equal(again.status, 409);
+    assert.equal(again.body.error.message, 'This order has already been delivered.');
   });
 
   test('the same number from another app, or after cancelling, is allowed', async () => {
@@ -459,6 +467,21 @@ describe('orders that need attention', () => {
     assert.equal((await orders.sendAttentionAlerts()).late, 1);
     const dash = await request(app).get('/api/admin/dashboard').set(bearer(admin));
     assert.equal(dash.body.orders.find((o) => o.id === a).attention, 'late_delivery');
+  });
+});
+
+describe('signing out', () => {
+  test('a driver who signs out shows offline to their merchant', async () => {
+    const login = await request(app).post('/api/auth/login').send({ email: 'ali@races.test', password: 'Passw0rd123' });
+    const me = { token: login.body.tokens.accessToken };
+    await request(app).put('/api/driver/availability').set(bearer(me)).send({ online: true });
+    const online = async () =>
+      (await request(app).get('/api/restaurant/dashboard').set(bearer(restaurant))).body.drivers.find((d) => d.email === 'ali@races.test')
+        .isOnline;
+    assert.equal(await online(), true);
+    const out = await request(app).post('/api/auth/logout').send({ refreshToken: login.body.tokens.refreshToken });
+    assert.equal(out.status, 204);
+    assert.equal(await online(), false);
   });
 });
 

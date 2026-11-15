@@ -20,19 +20,20 @@ appId: host.exp.Exponent
     timeout: 20000
     optional: true
 - extendedWaitUntil:
-    visible: "Photo.*"
+    visible: "Photo, .*"
     timeout: 10000
     optional: true
 - runFlow:
     when:
-      visible: "Photo.*"
+      visible: "Photo, .*"
     commands:
       - tapOn:
-          text: "Photo.*"
+          text: "Photo, .*"
           index: 0
+# Still on the picker (the photo cells could not be read): tap the first cell by position.
 - runFlow:
     when:
-      notVisible: "Photo.*"
+      visible: "Collections"
     commands:
       - tapOn:
           point: "16%,46%"

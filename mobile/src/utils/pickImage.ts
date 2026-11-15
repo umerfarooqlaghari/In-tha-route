@@ -1,3 +1,5 @@
+import * as DocumentPicker from 'expo-document-picker';
+import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { Alert, Linking } from 'react-native';
 
@@ -61,6 +63,51 @@ export function chooseImage(title: string): Promise<PickedImage | null> {
       [
         { text: 'Take photo', onPress: () => pickImage('camera').then(resolve) },
         { text: 'Choose from library', onPress: () => pickImage('library').then(resolve) },
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(null) }
+    );
+  });
+}
+
+export const PDF = 'application/pdf';
+export const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+// Driver documents: the server takes up to 8 MB for a PDF or .docx file.
+const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+
+/** Picks a PDF or .docx file from the phone (Files, iCloud Drive, Google Drive...). */
+export async function pickDocumentFile(): Promise<PickedImage | null> {
+  try {
+    const result = await DocumentPicker.getDocumentAsync({ type: [PDF, DOCX], copyToCacheDirectory: true });
+    if (result.canceled) return null;
+    const asset = result.assets[0];
+    const name = asset.name.toLowerCase();
+    const mimeType = name.endsWith('.pdf') ? PDF : name.endsWith('.docx') ? DOCX : asset.mimeType;
+    if (mimeType !== PDF && mimeType !== DOCX) {
+      Alert.alert('File not supported', 'Please choose a PDF or a .docx file.');
+      return null;
+    }
+    if (asset.size && asset.size > MAX_DOCUMENT_BYTES) {
+      Alert.alert('File too large', 'Please choose a file under 8 MB.');
+      return null;
+    }
+    return { base64: await new File(asset.uri).base64(), mimeType };
+  } catch {
+    Alert.alert('File not available', 'That file could not be opened. Please try another one.');
+    return null;
+  }
+}
+
+/** For driver documents: a photo, a PDF or a .docx file. */
+export function chooseDocument(title: string): Promise<PickedImage | null> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      title,
+      'Upload a photo, a PDF or a .docx file.',
+      [
+        { text: 'Take photo', onPress: () => pickImage('camera').then(resolve) },
+        { text: 'Choose photo', onPress: () => pickImage('library').then(resolve) },
+        { text: 'Choose PDF or .docx', onPress: () => pickDocumentFile().then(resolve) },
         { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
       ],
       { cancelable: true, onDismiss: () => resolve(null) }

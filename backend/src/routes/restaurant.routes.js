@@ -12,6 +12,8 @@ const router = express.Router();
 router.use(authenticate, authorize(ROLES.RESTAURANT));
 
 router.get('/dashboard', h(c.dashboard)); // orders, in-house drivers, policy, fee
+router.get('/history', h(c.orderHistory)); // delivered orders
+router.get('/analytics', h(c.orderAnalytics)); // ?days=7|30|90
 router.post('/receipts/scan', scanLimiter, h(c.scanReceipt)); // photo -> draft order (OCR)
 router.post('/orders', h(c.createOrder)); // post an order
 router.get('/orders/:id/receipt', h(c.orderReceipt)); // the scanned receipt photo

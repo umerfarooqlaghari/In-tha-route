@@ -12,7 +12,8 @@ const router = express.Router();
 router.use(authenticate, authorize(ROLES.DRIVER));
 
 router.get('/dashboard', h(c.dashboard)); // batch, pool, earnings, documents
-router.post('/documents/:id/upload', h(c.uploadDocument)); // KYC photo (open to pending drivers)
+router.post('/documents/:id/upload', h(c.uploadDocument)); // KYC photo, PDF or Word file (open to pending drivers)
+router.get('/documents/:id/file', h(c.documentFile)); // the driver's own uploaded file
 
 // Everything below needs an approved driver.
 router.put('/availability', approved, h(c.setAvailability)); // online / offline

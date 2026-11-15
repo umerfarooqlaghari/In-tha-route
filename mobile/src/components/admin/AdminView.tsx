@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LiveMap, MapPin } from '@/components/LiveMap';
 import { ReceiptSheet } from '@/components/ReceiptSheet';
@@ -20,11 +20,10 @@ import {
   Stat,
   Stepper,
 } from '@/components/ui';
-import { API_URL } from '@/constants/api';
 import { Brand, formatGbp, sourceColor } from '@/constants/brand';
 import { coordsForPostcode } from '@/constants/geo';
 import { DriverPolicy, DriverProfile, KycDocument, LiveOrder, useInThaRoute } from '@/context/InThaRouteContext';
-import { getAccessToken } from '@/services/apiClient';
+import { UploadedFile } from '@/components/UploadedFile';
 
 const C = Brand.colors;
 const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
@@ -653,39 +652,12 @@ function DriversScreen() {
   );
 }
 
-/** The photo a driver uploaded, fetched with the admin's sign-in. */
+/** The photo, PDF or .docx file a driver uploaded, fetched with the admin's sign-in. */
 function DocumentPhoto({ doc }: { doc: KycDocument }) {
-  const [token, setToken] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    getAccessToken()
-      .then((t) => !cancelled && setToken(t))
-      .catch(() => !cancelled && setFailed(true));
-    return () => {
-      cancelled = true;
-    };
-  }, [doc.id]);
-
   return (
-    <View style={styles.photoWrap}>
-      {failed ? (
-        <Text style={styles.muted}>The photo couldn’t be loaded.</Text>
-      ) : token ? (
-        <Image
-          style={styles.photo}
-          resizeMode="contain"
-          onError={() => setFailed(true)}
-          source={{
-            uri: `${API_URL}/api/admin/kyc-documents/${doc.id}/file`,
-            headers: { Authorization: `Bearer ${token}` },
-          }}
-        />
-      ) : (
-        <ActivityIndicator color={C.primary} />
-      )}
-      <Text style={styles.muted}>{doc.updatedAt}</Text>
+    <View style={styles.gap10}>
+      <UploadedFile doc={doc} path={`/api/admin/kyc-documents/${doc.id}/file`} />
+      <Text style={[styles.muted, styles.centerText]}>{doc.updatedAt}</Text>
     </View>
   );
 }
@@ -740,6 +712,7 @@ const styles = StyleSheet.create({
   flex1: { flex: 1 },
   flex2: { flex: 2 },
   actionRow: { flexDirection: 'row', gap: 10 },
+  centerText: { textAlign: 'center' },
   photoWrap: { alignItems: 'center', justifyContent: 'center', gap: 10, minHeight: 200 },
   photo: { width: '100%', height: 360, borderRadius: Brand.radius.md, backgroundColor: C.surfaceAlt },
   gap10: { gap: 10 },

@@ -11,22 +11,49 @@ const storage = require('./storage.service');
  */
 const MAX_BYTES = 6 * 1024 * 1024;
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'];
+// Driver documents may also be a PDF or a Word (.docx) file. Each is checked by its first bytes
+// too, so a file cannot pretend to be a document it is not.
+const DOCUMENT_MAX_BYTES = 8 * 1024 * 1024;
+const DOCUMENTS = {
+  'application/pdf': (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
+  // .docx: a zip archive.
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': (b) =>
+    b.subarray(0, 4).equals(Buffer.from('504b0304', 'hex')),
+};
 const EXTENSIONS = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
   'image/heic': 'heic',
   'image/heif': 'heif',
+  'application/pdf': 'pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
 };
 
-function decodeImage(imageBase64, mimeType) {
-  if (!ALLOWED.includes(mimeType)) {
-    throw new AppError(400, 'UNSUPPORTED_IMAGE', 'Please upload a JPEG or PNG photo.');
+/** What kind of file a stored type is, for the apps: a photo, a PDF or a .docx document. */
+const fileKind = (mimeType) =>
+  !mimeType ? undefined : mimeType === 'application/pdf' ? 'pdf' : mimeType.startsWith('image/') ? 'image' : 'word';
+
+function decodeImage(imageBase64, mimeType, { allowDocuments = false } = {}) {
+  const isDocument = allowDocuments && Object.hasOwn(DOCUMENTS, mimeType);
+  if (!ALLOWED.includes(mimeType) && !isDocument) {
+    throw new AppError(
+      400,
+      'UNSUPPORTED_IMAGE',
+      allowDocuments ? 'Please upload a photo, a PDF or a .docx file.' : 'Please upload a JPEG or PNG photo.'
+    );
   }
   const clean = String(imageBase64).replace(/^data:[^;]+;base64,/, '');
   const data = Buffer.from(clean, 'base64');
-  if (data.length === 0) throw new AppError(400, 'EMPTY_IMAGE', 'The photo was empty. Please try again.');
-  if (data.length > MAX_BYTES) throw new AppError(413, 'IMAGE_TOO_LARGE', 'That photo is too large. Please use one under 6 MB.');
+  const what = isDocument ? 'file' : 'photo';
+  if (data.length === 0) throw new AppError(400, 'EMPTY_IMAGE', `The ${what} was empty. Please try again.`);
+  const max = isDocument ? DOCUMENT_MAX_BYTES : MAX_BYTES;
+  if (data.length > max) {
+    throw new AppError(413, 'IMAGE_TOO_LARGE', `That ${what} is too large. Please use one under ${max / 1024 / 1024} MB.`);
+  }
+  if (isDocument && !DOCUMENTS[mimeType](data)) {
+    throw new AppError(400, 'UNSUPPORTED_IMAGE', 'That file could not be read as a PDF or .docx file.');
+  }
   return { data, base64: clean };
 }
 
@@ -38,8 +65,8 @@ const objectKey = (folder, ownerUserId, id, mimeType) =>
  * If the surrounding transaction rolls back after this, the S3 object stays behind;
  * callers can remove it with `discardUnsaved`.
  */
-async function saveImage({ imageBase64, mimeType, ownerUserId, folder = 'kyc' }, client = db) {
-  const { data } = decodeImage(imageBase64, mimeType);
+async function saveImage({ imageBase64, mimeType, ownerUserId, folder = 'kyc', allowDocuments = false }, client = db) {
+  const { data } = decodeImage(imageBase64, mimeType, { allowDocuments });
   const id = crypto.randomUUID();
 
   if (!storage.isEnabled()) {
@@ -123,6 +150,7 @@ async function deleteUnpostedReceipts(olderThanHours = UNPOSTED_RECEIPT_HOURS) {
 
 module.exports = {
   decodeImage,
+  fileKind,
   saveImage,
   getFile,
   deleteFile,

@@ -66,11 +66,13 @@ async function consumeRefreshToken(token) {
   throw invalid;
 }
 
+/** Returns the user the token belonged to (null if it was unknown or already revoked). */
 async function revokeRefreshToken(token) {
-  await db.query(
-    'UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL',
+  const { rows } = await db.query(
+    'UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL RETURNING user_id',
     [sha256(token)]
   );
+  return rows[0]?.user_id ?? null;
 }
 
 async function revokeAllForUser(userId) {

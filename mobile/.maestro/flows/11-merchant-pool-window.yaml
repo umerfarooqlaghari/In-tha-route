@@ -1,0 +1,182 @@
+# Password fields (eye + "Passwords match"), Merchant wording, prep time and who delivers on
+# the review step, and the pool window: countdown and Reject for the driver, and for the
+# merchant the "No drivers available right now" choices (popup and order card).
+# Run the local backend with a short window (POOL_WINDOW_SECONDS=45) or the waits take minutes.
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
+- addMedia:
+    - "../assets/test-receipt.jpg"
+- runFlow: ../common/open-app.yaml
+- runFlow: ../common/logout.yaml
+
+# --- Sign up: Merchant wording, eye and "Passwords match" (nothing is submitted) ---
+- assertVisible: "Sign up as Merchant"
+- assertNotVisible: ".*Restaurant.*"
+- tapOn: "Sign up as Merchant"
+- extendedWaitUntil:
+    visible: "Merchant sign up"
+    timeout: 15000
+- scrollUntilVisible:
+    element: "Confirm password"
+- tapOn:
+    below: "Password"
+    above: "At least 8 characters.*"
+    leftOf:
+      text: "Show password"
+      index: 0
+# The first character makes iOS offer a strong password in a system sheet Maestro cannot
+# see: close it by position, then type the password.
+- inputText: "x"
+- tapOn:
+    point: "92%,58%"
+- eraseText: 20
+- inputText: "Dummy1234"
+- assertNotVisible: "Passwords match"
+- tapOn:
+    below: "Confirm password"
+    above: "YOUR MERCHANT"
+    leftOf:
+      text: "Show password"
+      index: 1
+- inputText: "Dummy1234"
+- extendedWaitUntil:
+    visible: "Passwords match"
+    timeout: 10000
+- assertNotVisible: "Dummy1234"
+- tapOn:
+    text: "Show password"
+    index: 0
+- assertVisible: "Hide password"
+- assertVisible: "Dummy1234"
+- takeScreenshot: results/11-signup
+- tapOn: "Hide password"
+- assertNotVisible: "Hide password"
+- scrollUntilVisible:
+    element: "I already have an account"
+- tapOn: "I already have an account"
+
+# --- Log in: the eye shows what was typed ---
+- tapOn:
+    id: "login-password"
+- inputText: "E2ePass123"
+- tapOn: "Show password"
+- assertVisible: "Hide password"
+- assertVisible: "E2ePass123"
+- tapOn: "Hide password"
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: rest@e2e.test
+- assertVisible: "Merchant"
+
+# --- New order: prep time and who delivers sit on the review step ---
+- runFlow: ../common/upload-receipt.yaml
+- assertVisible: "Liam Test"
+- scrollUntilVisible:
+    element: "Who delivers?"
+- takeScreenshot: results/11-review-step
+- tapOn: "Platform driver"
+- assertVisible: "Delivery fee"
+- tapOn: "Post order"
+- extendedWaitUntil:
+    visible: "Order is live"
+    timeout: 30000
+- tapOn: "View live orders"
+- extendedWaitUntil:
+    visible: "Liam Test"
+    timeout: 15000
+
+# --- Nobody accepts in time: popup, then the same choices on the card ---
+- extendedWaitUntil:
+    visible: "No drivers available right now"
+    timeout: 120000
+- assertVisible: "Find drivers again"
+- assertVisible: "Give to this driver"
+- assertVisible: ".*Ali Khan.*"
+- takeScreenshot: results/11-no-drivers-popup
+- tapOn:
+    text: "Close"
+    index: 1
+- extendedWaitUntil:
+    notVisible: "No drivers available right now"
+    timeout: 10000
+- scrollUntilVisible:
+    element: "My drivers"
+- assertVisible: "Find drivers again"
+- takeScreenshot: results/11-card-buttons
+# Find again: back in the pool, the buttons go, and when the new window runs out it asks again.
+- tapOn: "Find drivers again"
+- extendedWaitUntil:
+    notVisible: "Find drivers again"
+    timeout: 20000
+- extendedWaitUntil:
+    visible: "No drivers available right now"
+    timeout: 120000
+- tapOn: "Give to this driver"
+- extendedWaitUntil:
+    notVisible: "No drivers available right now"
+    timeout: 20000
+- extendedWaitUntil:
+    visible: ".*Your driver.*|.*Ali Khan.*"
+    timeout: 20000
+- assertNotVisible: "Find drivers again"
+- takeScreenshot: results/11-given-to-own-driver
+
+# --- Driver: countdown and Reject on the pool card; the order leaves at 0 ---
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: driver1@e2e.test
+- runFlow:
+    when:
+      visible: "Go online"
+    commands:
+      - tapOn: "Go online"
+- runFlow: ../common/allow-location.yaml
+- extendedWaitUntil:
+    visible: "Online"
+    timeout: 15000
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: poolOrder
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: open_pool
+- extendedWaitUntil:
+    visible: "Leaves the pool in .*"
+    timeout: 30000
+- assertVisible: "Saffron Kitchen"
+- assertVisible: "Accept"
+- takeScreenshot: results/11-pool-card
+- tapOn: "Reject"
+- extendedWaitUntil:
+    visible: "No orders nearby"
+    timeout: 20000
+# A second order is left alone: it disappears by itself when its time is up.
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: poolOrder
+- extendedWaitUntil:
+    visible: "Leaves the pool in .*"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "No orders nearby"
+    timeout: 120000
+
+# --- Admin menu says Merchants ---
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: admin@e2e.test
+- tapOn:
+    id: "open-menu"
+- assertVisible: ".*Merchants.*"
+- assertNotVisible: ".*Restaurants.*"
+- takeScreenshot: results/11-admin-menu

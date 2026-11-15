@@ -28,6 +28,16 @@ async function createSlots(driverId, client = db) {
   );
 }
 
+/** What the document card says was sent: a photo, a PDF or a .docx file. */
+function submittedLabel(row) {
+  if (row.status === 'missing') return 'Nothing uploaded yet';
+  const kind = row.file_id ? files.fileKind(row.file_mime) : null;
+  if (kind === 'pdf') return 'PDF submitted';
+  if (kind === 'word') return '.docx file submitted';
+  if (kind === 'image') return 'Photo submitted';
+  return 'Document submitted';
+}
+
 function toDocument(row) {
   const meta = META.get(row.doc_type);
   const updatedAt =
@@ -41,10 +51,12 @@ function toDocument(row) {
     type: row.doc_type,
     title: meta.title,
     subtitle: meta.subtitle,
-    value: row.status === 'missing' ? 'No photo uploaded' : 'Photo submitted',
+    value: submittedLabel(row),
     status: row.status,
     updatedAt,
     hasFile: Boolean(row.file_id),
+    // 'image', 'pdf' or 'word', so the apps know how to show it.
+    fileType: row.file_id ? files.fileKind(row.file_mime) : undefined,
   };
 }
 
@@ -52,7 +64,11 @@ function toDocument(row) {
 async function listForDrivers(driverIds, client = db) {
   const byDriver = new Map(driverIds.map((id) => [id, []]));
   if (driverIds.length === 0) return byDriver;
-  const { rows } = await client.query('SELECT * FROM kyc_documents WHERE driver_id = ANY($1::uuid[])', [driverIds]);
+  const { rows } = await client.query(
+    `SELECT k.*, f.mime_type AS file_mime FROM kyc_documents k LEFT JOIN files f ON f.id = k.file_id
+      WHERE k.driver_id = ANY($1::uuid[])`,
+    [driverIds]
+  );
   rows.sort((a, b) => ORDER.get(a.doc_type) - ORDER.get(b.doc_type));
   for (const row of rows) byDriver.get(row.driver_id).push(toDocument(row));
   return byDriver;
@@ -71,7 +87,7 @@ async function upload({ driverId, userId, documentId, imageBase64, mimeType }) {
       const doc = rows[0];
       if (!doc) throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'Document not found.');
 
-      newFileId = await files.saveImage({ imageBase64, mimeType, ownerUserId: userId }, client);
+      newFileId = await files.saveImage({ imageBase64, mimeType, ownerUserId: userId, allowDocuments: true }, client);
       await client.query(
         `UPDATE kyc_documents SET status = 'pending', file_id = $1, note = NULL, reviewed_by = NULL, updated_at = now()
           WHERE id = $2`,
@@ -160,9 +176,12 @@ async function reject(driverId, adminUserId, reason) {
   for (const id of oldFileIds) await files.deleteFile(id);
 }
 
-/** The stored photo for a document (admin review). */
-async function getDocumentFile(documentId) {
-  const { rows } = await db.query('SELECT file_id FROM kyc_documents WHERE id = $1', [documentId]);
+/** The stored photo, PDF or Word file for a document (admin review, or the driver's own). */
+async function getDocumentFile(documentId, { driverId } = {}) {
+  const { rows } = await db.query(
+    'SELECT file_id FROM kyc_documents WHERE id = $1 AND ($2::uuid IS NULL OR driver_id = $2)',
+    [documentId, driverId || null]
+  );
   if (!rows[0] || !rows[0].file_id) return null;
   return files.getFile(rows[0].file_id);
 }

@@ -91,7 +91,7 @@ async function orderReceipt(req, res) {
 /** The photo a driver uploaded for one document. */
 async function documentFile(req, res) {
   const file = await kyc.getDocumentFile(parse(v.uuidSchema, req.params.id));
-  if (!file) throw new AppError(404, 'FILE_NOT_FOUND', 'No photo has been uploaded for this document.');
+  if (!file) throw new AppError(404, 'FILE_NOT_FOUND', 'No file has been uploaded for this document.');
   res.set('Content-Type', file.mime_type);
   res.set('Cache-Control', 'private, no-store');
   res.send(file.data);

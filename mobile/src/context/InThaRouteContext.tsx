@@ -143,6 +143,8 @@ export interface KycDocument {
   status: 'verified' | 'pending' | 'missing';
   updatedAt: string;
   hasFile?: boolean;
+  /** What was uploaded: a photo, a PDF or a .docx file. */
+  fileType?: 'image' | 'pdf' | 'word';
 }
 
 export interface DriverProfile {
@@ -272,6 +274,8 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
   restaurant: [
     { key: 'scan_receipt', title: 'New order', subtitle: 'Scan a receipt', icon: 'scan-outline' },
     { key: 'live_orders', title: 'Live orders', subtitle: 'Prep timers & couriers', icon: 'time-outline' },
+    { key: 'past_orders', title: 'Past orders', subtitle: 'Delivered orders', icon: 'receipt-outline' },
+    { key: 'analytics', title: 'Analytics', subtitle: 'Sales, orders & trends', icon: 'stats-chart-outline' },
     { key: 'messages', title: 'Messages', subtitle: 'Chats with drivers', icon: 'chatbubbles-outline' },
     { key: 'own_drivers', title: 'My drivers', subtitle: 'Your in-house team', icon: 'people-outline' },
     { key: 'dispatch_policy', title: 'Delivery settings', subtitle: 'Who delivers your orders', icon: 'options-outline' },
@@ -741,7 +745,9 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
       });
       return res.order;
     } catch (err) {
-      showError(err, 'Couldn’t post the order');
+      // The same receipt again: the message says it all ("This order is already live.").
+      if (err instanceof ApiError && err.code === 'DUPLICATE_ORDER') Alert.alert(err.message);
+      else showError(err, 'Couldn’t post the order');
       return null;
     }
   };

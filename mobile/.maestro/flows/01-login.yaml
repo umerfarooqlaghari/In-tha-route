@@ -1,6 +1,11 @@
 # Wrong password is refused; each role signs in to its own home screen.
 appId: host.exp.Exponent
 ---
+# An order left waiting by an earlier flow would greet the merchant with a popup.
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
 - runFlow: ../common/open-app.yaml
 - runFlow: ../common/logout.yaml
 - tapOn: "Log in"

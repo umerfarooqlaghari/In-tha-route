@@ -213,7 +213,17 @@ async function uploadDocument(req, res) {
   res.json({ dashboard: await buildDashboard(req.user) });
 }
 
+/** The driver's own uploaded document (photo, PDF or Word file). */
+async function documentFile(req, res) {
+  const file = await kyc.getDocumentFile(parse(v.uuidSchema, req.params.id), { driverId: req.user.driver_id });
+  if (!file) throw new AppError(404, 'FILE_NOT_FOUND', 'No file has been uploaded for this document.');
+  res.set('Content-Type', file.mime_type);
+  res.set('Cache-Control', 'private, no-store');
+  res.send(file.data);
+}
+
 module.exports = {
+  documentFile,
   dashboard,
   setAvailability,
   updateLocation,
