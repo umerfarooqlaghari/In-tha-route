@@ -20,8 +20,8 @@ export function Welcome() {
   return (
     <main className="brand-gradient grain relative isolate flex min-h-dvh flex-col overflow-hidden text-white">
       <RouteBackdrop />
-      <div className="pointer-events-none absolute -top-40 -right-40 size-[38rem] rounded-full bg-crimson-500/30 blur-[120px]" />
-      <div className="pointer-events-none absolute -bottom-48 -left-40 size-[34rem] rounded-full bg-black/60 blur-[120px]" />
+      <div className="pointer-events-none absolute -top-40 -right-40 size-[38rem] rounded-full bg-crimson-700/40 blur-[120px]" />
+      <div className="pointer-events-none absolute -bottom-48 -left-40 size-[34rem] rounded-full bg-crimson-800/50 blur-[120px]" />
 
       <header className="relative z-10 mx-auto flex w-full max-w-7xl items-center justify-between px-5 pt-6 sm:px-8">
         <motion.div

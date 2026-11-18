@@ -30,7 +30,7 @@ export function AuthShell({
     <main className="grid min-h-dvh bg-surface lg:grid-cols-[1.05fr_1fr]">
       <aside className="brand-gradient grain relative isolate overflow-hidden px-5 py-6 text-white sm:px-10 lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col lg:py-10">
         <RouteBackdrop />
-        <div className="pointer-events-none absolute -top-40 -right-32 size-[30rem] rounded-full bg-crimson-500/30 blur-[110px]" />
+        <div className="pointer-events-none absolute -top-40 -right-32 size-[30rem] rounded-full bg-crimson-700/40 blur-[110px]" />
 
         <div className="relative z-10 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3">

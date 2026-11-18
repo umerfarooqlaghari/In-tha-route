@@ -18,6 +18,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { LogoMark, Wordmark } from "@/components/brand/Logo";
 import { LiveDot } from "@/components/ui";
@@ -201,7 +202,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () =>
               {active && (
                 <motion.span
                   layoutId="nav-active"
-                  className="brand-gradient absolute inset-0 rounded-2xl shadow-[0_12px_30px_-12px_rgb(110_0_0/0.8)]"
+                  className="brand-gradient absolute inset-0 rounded-2xl shadow-[0_12px_30px_-12px_rgb(207_60_66/0.6)]"
                   transition={{ type: "spring", stiffness: 420, damping: 36 }}
                 />
               )}
@@ -245,7 +246,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () =>
 function TopBar({ title, subtitle, onMenu }: { title: string; subtitle: string; onMenu: () => void }) {
   return (
     <header className="brand-gradient grain relative isolate overflow-hidden pb-24 text-white">
-      <div className="pointer-events-none absolute -top-24 right-10 size-80 rounded-full bg-crimson-500/40 blur-[90px]" />
+      <div className="pointer-events-none absolute -top-24 right-10 size-80 rounded-full bg-crimson-700/30 blur-[90px]" />
       <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-30" preserveAspectRatio="none" viewBox="0 0 1200 200" aria-hidden>
         <path d="M-20 160 C 200 120, 380 40, 620 90 S 980 170, 1220 60" fill="none" stroke="#F5B014" strokeWidth="1.5" strokeDasharray="8 12" className="animate-dash" />
       </svg>
@@ -311,13 +312,36 @@ function ProfileMenu() {
   const { user, logout } = useAdmin();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  // Where the menu opens, under the button. The menu is drawn at the end of <body> so
+  // the header (which clips its glow) and the page cards can't cover it.
+  const [pos, setPos] = useState({ top: 0, right: 0 });
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const toggle = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 12, right: Math.max(16, window.innerWidth - r.right) });
+    setOpen((o) => !o);
+  };
 
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!ref.current?.contains(t) && !menuRef.current?.contains(t)) setOpen(false);
+    };
+    const close = () => setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [open]);
   useLayoutEffect(() => () => setOpen(false), []);
 
@@ -325,7 +349,7 @@ function ProfileMenu() {
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         className="flex items-center gap-2.5 rounded-full bg-white/10 p-1 pr-3 ring-1 ring-white/15 transition hover:bg-white/20"
         aria-expanded={open}
       >
@@ -335,15 +359,17 @@ function ProfileMenu() {
         <span className="hidden text-sm font-semibold md:block">{user.fullName.split(" ")[0]}</span>
         <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
       </button>
+      {createPortal(
       <AnimatePresence>
         {open && (
           <motion.div
+            ref={menuRef}
             initial={{ opacity: 0, y: -8, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.96 }}
             transition={{ duration: 0.16 }}
-            style={{ transformOrigin: "top right" }}
-            className="absolute right-0 z-50 mt-3 w-72 overflow-hidden rounded-2xl border border-line bg-surface text-ink shadow-[var(--shadow-float)]"
+            style={{ transformOrigin: "top right", top: pos.top, right: pos.right }}
+            className="fixed z-[80] w-72 max-w-[calc(100vw-32px)] overflow-hidden rounded-2xl border border-line bg-surface text-ink shadow-[var(--shadow-float)]"
           >
             <div className="flex items-center gap-3 border-b border-line p-4">
               <span className="brand-gradient grid size-11 place-items-center rounded-2xl text-sm font-extrabold text-white">
@@ -365,7 +391,9 @@ function ProfileMenu() {
             </button>
           </motion.div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }

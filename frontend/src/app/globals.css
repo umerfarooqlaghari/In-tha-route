@@ -2,8 +2,8 @@
 
 /*
  * In Tha Route — web design tokens.
- * Deep crimson brand gradient (legacy panel header), the app's softened red
- * for actions, and calm neutral surfaces for data.
+ * The app's red (#E5484D, Brand.colors.primary in mobile/src/constants/brand.ts)
+ * for the brand surfaces and actions, and calm neutral surfaces for data.
  */
 @theme inline {
   --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
@@ -24,12 +24,13 @@
   --color-brand-soft: #fff2f2;
   --color-brand-line: #fbd5d6;
 
-  --color-crimson-950: #140000;
-  --color-crimson-900: #2b0000;
-  --color-crimson-800: #4a0000;
-  --color-crimson-700: #6e0000;
-  --color-crimson-600: #9a0505;
-  --color-crimson-500: #c41414;
+  /* Shades of the app red, darkest first */
+  --color-crimson-950: #3a0d10;
+  --color-crimson-900: #6b1a1e;
+  --color-crimson-800: #9e2a2f;
+  --color-crimson-700: #b8323a;
+  --color-crimson-600: #cf3c42;
+  --color-crimson-500: #e5484d;
 
   --color-road: #f5b014;
 
@@ -101,8 +102,8 @@ body {
 
 .brand-gradient {
   background:
-    radial-gradient(120% 140% at 100% 0%, rgb(196 20 20 / 0.95) 0%, transparent 55%),
-    linear-gradient(100deg, var(--color-crimson-950) 0%, var(--color-crimson-800) 45%, var(--color-crimson-600) 100%);
+    radial-gradient(120% 140% at 100% 0%, rgb(229 72 77 / 0.85) 0%, transparent 60%),
+    linear-gradient(100deg, var(--color-crimson-700) 0%, var(--color-crimson-600) 45%, var(--color-crimson-500) 100%);
 }
 
 .grain::after {
