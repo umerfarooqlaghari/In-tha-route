@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# In Tha Route — Web portal
 
-## Getting Started
+Next.js web portal for the platform team (Administrator) and, in a later phase, merchants.
+It uses the same API as the mobile app (`backend/`), so the web panel and the app always show the same data.
 
-First, run the development server:
+## Pages
+
+| Path | What it is |
+| --- | --- |
+| `/` | Welcome page: choose Administrator or Merchant |
+| `/admin/login` | Administrator sign-in (admin accounts only) |
+| `/admin` | Overview: revenue today, live map, fleet, charts, latest live orders |
+| `/admin/orders` | Live orders: search, filters, receipt, move driver, cancel |
+| `/admin/pricing` | Batch simulator, fees, extra miles, max batch, driver radius, pay per order |
+| `/admin/drivers` | Platform driver approvals with document viewer; in-house drivers |
+| `/admin/merchants` | Merchants and their delivery policy (Platform / Hybrid / Own) |
+| `/merchant/login`, `/merchant/signup` | Merchant sign-in and sign-up (the merchant portal itself is the next phase) |
+
+## Live sync with the app
+
+The admin panel re-reads `GET /api/admin/dashboard` every 10 seconds while the tab is visible, straight away when the tab
+regains focus, and after every change (each change endpoint also returns the fresh dashboard). The mobile app does the
+same, so a change made on either side shows on the other within seconds. Open web tabs also notify each other at once.
+
+## Running it
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The API defaults to the live backend (`https://in-the-route-app.onrender.com`). To use a local backend:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:5000 npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Map tiles come from OpenStreetMap.

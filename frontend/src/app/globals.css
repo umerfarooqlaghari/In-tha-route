@@ -1,26 +1,155 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
+/*
+ * In Tha Route — web design tokens.
+ * Deep crimson brand gradient (legacy panel header), the app's softened red
+ * for actions, and calm neutral surfaces for data.
+ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --color-bg: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f1f2f5;
+  --color-line: #ecedf0;
+  --color-line-strong: #dadce1;
+
+  --color-ink: #14151a;
+  --color-ink-2: #50535c;
+  --color-ink-3: #8b8f98;
+
+  --color-brand: #e5484d;
+  --color-brand-pressed: #cf3c42;
+  --color-brand-soft: #fff2f2;
+  --color-brand-line: #fbd5d6;
+
+  --color-crimson-950: #140000;
+  --color-crimson-900: #2b0000;
+  --color-crimson-800: #4a0000;
+  --color-crimson-700: #6e0000;
+  --color-crimson-600: #9a0505;
+  --color-crimson-500: #c41414;
+
+  --color-road: #f5b014;
+
+  --color-success: #14a35a;
+  --color-success-soft: #eaf8f0;
+  --color-warning: #c27803;
+  --color-warning-soft: #fff6e6;
+  --color-info: #2f6fed;
+  --color-info-soft: #eef3fe;
+
+  --shadow-card: 0 1px 2px rgb(11 12 16 / 0.04), 0 8px 24px -12px rgb(11 12 16 / 0.12);
+  --shadow-float: 0 24px 60px -20px rgb(11 12 16 / 0.35);
+  --shadow-glow: 0 18px 50px -12px rgb(229 72 77 / 0.55);
+
+  --animate-dash: dash 1.6s linear infinite;
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-shine: shine 2.8s ease-in-out infinite;
+  --animate-pulse-ring: pulse-ring 1.8s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@keyframes dash {
+  to {
+    stroke-dashoffset: -40;
+  }
+}
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-14px);
+  }
+}
+@keyframes shine {
+  0% {
+    transform: translateX(-120%) skewX(-20deg);
+  }
+  60%,
+  100% {
+    transform: translateX(220%) skewX(-20deg);
+  }
+}
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
   }
 }
 
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.brand-gradient {
+  background:
+    radial-gradient(120% 140% at 100% 0%, rgb(196 20 20 / 0.95) 0%, transparent 55%),
+    linear-gradient(100deg, var(--color-crimson-950) 0%, var(--color-crimson-800) 45%, var(--color-crimson-600) 100%);
+}
+
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Thin, quiet scrollbars inside panels */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+/* Leaflet: let our own pins and popups carry the styling */
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: #e8eaee;
+}
+/* Calm the street map so the coloured pins stand out */
+.itr-tiles {
+  filter: saturate(0.35) contrast(0.95) brightness(1.03);
+}
+.itr-pin {
+  background: transparent;
+  border: 0;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 14px;
+  box-shadow: var(--shadow-float);
+}
+.leaflet-popup-content {
+  margin: 12px 14px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
