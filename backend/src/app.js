@@ -18,6 +18,16 @@ app.set('trust proxy', 1);
 // Middleware
 app.use(helmet());
 app.use(cors());
+// Stripe webhook (credits paid): needs the raw body to check Stripe's signature.
+app.post(
+  '/api/payments/stripe/webhook',
+  express.raw({ type: '*/*', limit: '1mb' }),
+  require('./utils/asyncHandler')(async (req, res) => {
+    await require('./services/credits.service').handleWebhook(req.body.toString('utf8'), req.get('stripe-signature'));
+    res.json({ received: true });
+  })
+);
+
 // Photo uploads (receipts, driver documents) arrive as base64 JSON and need more room.
 const smallJson = express.json({ limit: '100kb' });
 const photoJson = express.json({ limit: '12mb' });

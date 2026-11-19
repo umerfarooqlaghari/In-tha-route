@@ -22,6 +22,9 @@ import { BarList, Columns, Donut } from "./charts";
 import { LiveMap, type MapPin } from "./LiveMap";
 import { OrderCard } from "./OrderCard";
 
+const PLATFORM_DRIVER_COLOR = "#2F6FED";
+const OWN_DRIVER_COLOR = "#7A5AF8";
+
 export function OverviewScreen() {
   const { data, orders } = useAdmin();
 
@@ -54,12 +57,20 @@ export function OverviewScreen() {
           popup: [`${shortName(o.restaurantName)} · ${o.externalOrderId}`, `${o.customerName} · ${o.postcode}`],
         };
       }),
+      // Every online driver: platform drivers in blue, merchants' own drivers in purple.
       ...liveDrivers.map((d) => ({
         id: `d-${d.id}`,
         kind: "driver" as const,
+        color: d.driverType === "restaurant_own" ? OWN_DRIVER_COLOR : PLATFORM_DRIVER_COLOR,
         lat: d.location!.latitude,
         lng: d.location!.longitude,
-        popup: [d.name, `${d.activeOrders ?? 0} active order${d.activeOrders === 1 ? "" : "s"}`],
+        popup: [
+          d.name,
+          d.driverType === "restaurant_own"
+            ? `In-house · ${shortName(d.employerRestaurantName ?? "merchant")}`
+            : "Platform driver",
+          `${d.activeOrders ?? 0} active order${d.activeOrders === 1 ? "" : "s"}`,
+        ],
       })),
     ],
     [restaurants, live, liveDrivers]
@@ -157,12 +168,19 @@ export function OverviewScreen() {
               <h3 className="flex items-center gap-2 text-[15px] font-bold text-ink">
                 <LiveDot className="text-success" /> Live map
               </h3>
-              <p className="text-[13px] text-ink-3">Merchants, drop-offs and drivers sharing their location</p>
+              <p className="text-[13px] text-ink-3">Merchants, drop-offs and every online driver sharing their location</p>
             </div>
             <div className="flex flex-wrap gap-4 text-[12px] font-semibold text-ink-2">
               <Legend color="#14151A" label={`Merchants · ${restaurants.length}`} square />
               <Legend color="#E5484D" label={`Drop-offs · ${live.length}`} />
-              <Legend color="#2F6FED" label={`Drivers · ${liveDrivers.length}`} />
+              <Legend
+                color={PLATFORM_DRIVER_COLOR}
+                label={`Platform drivers · ${liveDrivers.filter((d) => d.driverType !== "restaurant_own").length}`}
+              />
+              <Legend
+                color={OWN_DRIVER_COLOR}
+                label={`Merchant drivers · ${liveDrivers.filter((d) => d.driverType === "restaurant_own").length}`}
+              />
             </div>
           </div>
           <LiveMap pins={pins} className="h-[420px] w-full" />

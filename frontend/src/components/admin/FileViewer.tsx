@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { Download, ExternalLink, FileText, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { fetchFile } from "@/lib/api";
+import { fetchFile, type Portal } from "@/lib/api";
 
 /**
  * A private file (receipt photo or driver document) fetched with the admin's
@@ -15,10 +15,12 @@ export function FileViewer({
   path,
   kind = "image",
   name,
+  portal = "admin",
 }: {
   path: string;
   kind?: "image" | "pdf" | "word";
   name: string;
+  portal?: Portal;
 }) {
   const [file, setFile] = useState<{ url: string; type: string } | null>(null);
   const [failed, setFailed] = useState(false);
@@ -26,7 +28,7 @@ export function FileViewer({
   useEffect(() => {
     let url: string | null = null;
     let cancelled = false;
-    fetchFile("admin", path)
+    fetchFile(portal, path)
       .then((f) => {
         url = f.url;
         if (cancelled) URL.revokeObjectURL(f.url);
@@ -37,7 +39,7 @@ export function FileViewer({
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [path]);
+  }, [path, portal]);
 
   if (failed) {
     return (

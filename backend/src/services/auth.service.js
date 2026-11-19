@@ -8,6 +8,13 @@ const kyc = require('./kyc.service');
 
 const UNIQUE_VIOLATION = '23505';
 
+/** Credits a new merchant starts with: 0 in production; test runs default to plenty. */
+function signupCredits() {
+  const fallback = process.env.NODE_ENV === 'test' ? 1000 : 0;
+  const n = Number(process.env.SIGNUP_CREDITS ?? fallback);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 /** `data` has already been validated against the schema for its role. */
 async function signup(data) {
   const passwordHash = await hashPassword(data.password);
@@ -27,6 +34,15 @@ async function signup(data) {
          VALUES ($1, $2, $3, $4, $5, $6)`,
         [userId, data.restaurantName, data.address, data.postcode, data.phone, data.pickupSafetyNote || null]
       );
+      // New merchants start with 0 credits and buy them. Test runs start with some (SIGNUP_CREDITS).
+      const startCredits = signupCredits();
+      if (startCredits > 0) {
+        await client.query(
+          `INSERT INTO credit_transactions (restaurant_id, kind, credits, note)
+           SELECT id, 'grant', $2, 'Starting credits' FROM restaurants WHERE owner_user_id = $1`,
+          [userId, startCredits]
+        );
+      }
     } else if (data.role === ROLES.DRIVER) {
       // Type and status are fixed here: self-registered drivers are platform
       // drivers awaiting KYC, whatever the request body says.

@@ -35,6 +35,12 @@ interface AdminState {
   updatePolicy: (restaurantId: string, policy: DriverPolicy) => Promise<boolean>;
   updateAlgorithm: (partial: Partial<AlgorithmConfig>) => Promise<boolean>;
   updateSteppedPayoutAt: (index: number, amountGbp: number) => Promise<boolean>;
+  /** A merchant's own per-delivery fee; null goes back to the standard fee. */
+  updateMerchantFee: (restaurantId: string, feeGbp: number | null) => Promise<boolean>;
+  /** Disable (signed out everywhere, can't sign in) or enable a merchant account. */
+  setMerchantActive: (restaurantId: string, active: boolean) => Promise<boolean>;
+  /** Add (positive) or remove (negative) credits by hand. */
+  adjustCredits: (restaurantId: string, credits: number, note: string) => Promise<boolean>;
 }
 
 const AdminContext = createContext<AdminState | null>(null);
@@ -205,6 +211,12 @@ export function AdminProvider({ user, children }: { user: AuthUser; children: Re
     updatePolicy,
     updateAlgorithm,
     updateSteppedPayoutAt,
+    updateMerchantFee: (id, fee) =>
+      attempt("PATCH", `/api/admin/restaurants/${id}/fee`, { customFeeGbp: fee }, fee == null ? "Back to the standard fee" : "Merchant fee saved"),
+    setMerchantActive: (id, active) =>
+      attempt("PATCH", `/api/admin/restaurants/${id}/status`, { active }, active ? "Merchant enabled" : "Merchant disabled"),
+    adjustCredits: (id, credits, note) =>
+      attempt("POST", `/api/admin/restaurants/${id}/credits`, { credits, note }, credits > 0 ? "Credits added" : "Credits removed"),
   };
 
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;

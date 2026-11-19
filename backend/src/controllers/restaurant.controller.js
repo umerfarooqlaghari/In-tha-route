@@ -1,5 +1,6 @@
 const { parse } = require('../middleware/validate');
 const analytics = require('../services/analytics.service');
+const credits = require('../services/credits.service');
 const drivers = require('../services/driver.service');
 const files = require('../services/file.service');
 const geo = require('../services/geo.service');
@@ -10,10 +11,10 @@ const restaurants = require('../services/restaurant.service');
 const AppError = require('../utils/AppError');
 const v = require('../validators/app.validator');
 
-/** A restaurant sees what it is charged, never what drivers are paid. */
-const restaurantPricing = (config) => ({
+/** A restaurant sees what it is charged (its own fee, if the admin set one), never what drivers are paid. */
+const restaurantPricing = (config, customFeeGbp) => ({
   baseDistanceMiles: config.baseDistanceMiles,
-  baseRestaurantChargeGbp: config.baseRestaurantChargeGbp,
+  baseRestaurantChargeGbp: pricing.feePerDelivery(config, customFeeGbp),
   extraMileRestaurantChargeGbp: config.extraMileRestaurantChargeGbp,
   extraMileDriverPayoutGbp: 0,
   maxBatchSize: config.maxBatchSize,
@@ -32,10 +33,11 @@ async function loadRestaurant(user) {
 /** Everything the restaurant screens show, in one response. */
 async function buildDashboard(user) {
   const restaurant = await loadRestaurant(user);
-  const [liveOrders, ownDrivers, config] = await Promise.all([
+  const [liveOrders, ownDrivers, config, creditSummary] = await Promise.all([
     orders.listLiveForRestaurant(restaurant.id),
     drivers.listByRestaurant(restaurant.id),
     pricing.getConfig(),
+    credits.summaryFor(restaurant.id),
   ]);
   return {
     role: 'restaurant',
@@ -43,7 +45,8 @@ async function buildDashboard(user) {
     restaurants: [restaurants.toPartner(restaurant)],
     orders: liveOrders,
     drivers: ownDrivers,
-    algorithm: restaurantPricing(config),
+    algorithm: restaurantPricing(config, restaurant.custom_fee_gbp),
+    credits: creditSummary,
   };
 }
 
@@ -108,7 +111,8 @@ async function scanReceipt(req, res) {
       restaurantPostcode: restaurant.postcode,
       restaurantPickupNote: restaurant.pickup_safety_note || '',
       distanceMiles,
-      estimatedFeeGbp: pricing.calculateOrderFinancials(config, distanceMiles, 1, 'open_platform').restaurantFeeGbp,
+      estimatedFeeGbp: pricing.calculateOrderFinancials(config, distanceMiles, 1, 'open_platform', restaurant.custom_fee_gbp)
+        .restaurantFeeGbp,
       pickupCoords:
         restaurant.latitude != null ? { latitude: restaurant.latitude, longitude: restaurant.longitude } : null,
       dropoffCoords,
@@ -183,8 +187,33 @@ async function orderAnalytics(req, res) {
   res.json(await analytics.forRestaurant(req.user.restaurant_id, days));
 }
 
+/** Credits: balance, deliveries left, and recent activity. */
+async function creditsOverview(req, res) {
+  const [summary, transactions] = await Promise.all([
+    credits.summaryFor(req.user.restaurant_id),
+    credits.transactionsFor(req.user.restaurant_id),
+  ]);
+  res.json({ credits: summary, transactions });
+}
+
+/** Starts a card payment for credits (Stripe Checkout) and returns where to send the merchant. */
+async function buyCredits(req, res) {
+  const { amountGbp, returnUrl } = parse(v.buyCreditsSchema, req.body);
+  res.status(201).json(await credits.startCheckout(req.user, amountGbp, returnUrl || req.get('origin')));
+}
+
+/** Back from Stripe: adds the credits if the payment went through. */
+async function confirmCredits(req, res) {
+  const { sessionId } = parse(v.confirmCheckoutSchema, req.body);
+  const status = await credits.confirmCheckout(req.user.restaurant_id, sessionId);
+  res.json({ status, credits: await credits.summaryFor(req.user.restaurant_id) });
+}
+
 module.exports = {
   dashboard,
+  creditsOverview,
+  buyCredits,
+  confirmCredits,
   orderHistory,
   orderAnalytics,
   scanReceipt,

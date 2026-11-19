@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const AppError = require('../utils/AppError');
+const credits = require('./credits.service');
 const geo = require('./geo.service');
 const pricing = require('./pricing.service');
 const { freshLocation } = require('./driver.service');
@@ -228,11 +229,12 @@ async function decline(driverId, { remember = true } = {}) {
     }
     const config = await pricing.getConfig(client);
     const { rows } = await client.query(
-      'SELECT id, distance_miles, dispatch_type FROM orders WHERE batch_id = $1 FOR UPDATE',
+      `SELECT id, distance_miles, dispatch_type, (SELECT custom_fee_gbp FROM restaurants r WHERE r.id = orders.restaurant_id) AS custom_fee_gbp
+         FROM orders WHERE batch_id = $1 FOR UPDATE`,
       [batch.id]
     );
     for (const o of rows) {
-      const fin = pricing.calculateOrderFinancials(config, Number(o.distance_miles), 1, o.dispatch_type);
+      const fin = pricing.calculateOrderFinancials(config, Number(o.distance_miles), 1, o.dispatch_type, o.custom_fee_gbp);
       await client.query(
         `UPDATE orders SET batch_id = NULL, batch_position = 1, assigned_driver_id = NULL,
                 status = ${BACK_TO_POOL_STATUS}, restaurant_fee_gbp = $1, driver_payout_gbp = $2,
@@ -281,6 +283,8 @@ async function advance(driverId) {
         'UPDATE driver_profiles SET completed_deliveries = completed_deliveries + 1 WHERE id = $1',
         [driverId]
       );
+      // The merchant's credits pay for the delivery now it is done.
+      await credits.chargeOrder(client, orders[index - n].id);
     }
 
     if (index + 1 >= n * 2) {
@@ -412,7 +416,8 @@ async function appendPoolOrder(driverId, orderId) {
 
     const position = count + 1;
     const dispatchType = inHouse ? 'own_driver' : 'open_platform';
-    const fin = pricing.calculateOrderFinancials(config, Number(order.distance_miles), position, dispatchType);
+    const customFee = await pricing.customFeeOf(client, order.restaurant_id);
+    const fin = pricing.calculateOrderFinancials(config, Number(order.distance_miles), position, dispatchType, customFee);
     await client.query(
       `UPDATE orders SET batch_id = $1, batch_position = $2, assigned_driver_id = $3, status = $4,
               restaurant_fee_gbp = $5, driver_payout_gbp = $6, dispatch_type = $8
@@ -523,12 +528,15 @@ async function detachFromBatch(client, orderId, { restaurantId, allowCollected =
       await client.query('UPDATE orders SET batch_id = NULL WHERE id = $1', [orderId]);
       const config = await pricing.getConfig(client);
       const { rows: rest } = await client.query(
-        `SELECT id, distance_miles, dispatch_type FROM orders WHERE batch_id = $1
+        `SELECT id, distance_miles, dispatch_type, (SELECT custom_fee_gbp FROM restaurants r WHERE r.id = orders.restaurant_id) AS custom_fee_gbp
+           FROM orders WHERE batch_id = $1
           ORDER BY batch_position ASC, created_at ASC FOR UPDATE`,
         [batch.id]
       );
       for (let i = 0; i < rest.length; i++) {
-        const fin = pricing.calculateOrderFinancials(config, Number(rest[i].distance_miles), i + 1, rest[i].dispatch_type);
+        const fin = pricing.calculateOrderFinancials(
+          config, Number(rest[i].distance_miles), i + 1, rest[i].dispatch_type, rest[i].custom_fee_gbp
+        );
         await client.query(
           'UPDATE orders SET batch_position = $1, restaurant_fee_gbp = $2, driver_payout_gbp = $3 WHERE id = $4',
           [i + 1, fin.restaurantFeeGbp, fin.driverPayoutGbp, rest[i].id]
@@ -576,6 +584,8 @@ async function cancelOrder(orderId, { userId, restaurantId, reason = '', allowCo
         WHERE id = $1`,
       [orderId, userId, reason, collected]
     );
+    // Collected then cancelled: the trip was made, so its fee is taken from the merchant's credits.
+    if (collected) await credits.chargeOrder(client, orderId, 'Cancelled after collection');
     return { order, driverUserId };
   });
 }
@@ -591,7 +601,8 @@ async function releaseToPool(orderId) {
       throw new AppError(409, 'ORDER_UNASSIGNED', 'This order is already waiting for a driver.');
     }
     const config = await pricing.getConfig(client);
-    const fin = pricing.calculateOrderFinancials(config, Number(order.distance_miles), 1, 'open_platform');
+    const customFee = await pricing.customFeeOf(client, order.restaurant_id);
+    const fin = pricing.calculateOrderFinancials(config, Number(order.distance_miles), 1, 'open_platform', customFee);
     await client.query(
       `UPDATE orders SET batch_id = NULL, batch_position = 1, assigned_driver_id = NULL,
               dispatch_type = 'open_platform', status = ${BACK_TO_POOL_STATUS},

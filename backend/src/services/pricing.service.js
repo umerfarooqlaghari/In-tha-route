@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const AppError = require('../utils/AppError');
 
 const round2 = (n) => Number(n.toFixed(2));
 
@@ -21,20 +22,32 @@ async function getConfig(client = db) {
   return toConfig(rows[0]);
 }
 
+/** The admin can charge one merchant a different per-delivery fee; otherwise the standard fee applies. */
+function feePerDelivery(config, customFeeGbp) {
+  return customFeeGbp != null && customFeeGbp !== '' ? Number(customFeeGbp) : config.baseRestaurantChargeGbp;
+}
+
+/** That merchant's own per-delivery fee, or null when they pay the standard fee. */
+async function customFeeOf(client, restaurantId) {
+  const { rows } = await client.query('SELECT custom_fee_gbp FROM restaurants WHERE id = $1', [restaurantId]);
+  return rows[0] && rows[0].custom_fee_gbp != null ? Number(rows[0].custom_fee_gbp) : null;
+}
+
 /**
  * What one order costs the restaurant and pays the driver.
  * This is the same formula the mobile app used locally, moved to the server:
  *  - own-driver orders carry no platform fee or payout;
- *  - the restaurant pays the base charge plus a per-mile surcharge beyond the base distance;
+ *  - the restaurant pays the base charge (or its own fee, if the admin set one) plus a per-mile
+ *    surcharge beyond the base distance;
  *  - the driver is paid by the order's position in the batch, plus a per-mile surcharge.
  */
-function calculateOrderFinancials(config, distanceMiles, batchPosition, dispatchType) {
+function calculateOrderFinancials(config, distanceMiles, batchPosition, dispatchType, customFeeGbp = null) {
   if (dispatchType === 'own_driver') {
     return { restaurantFeeGbp: 0, driverPayoutGbp: 0, platformMarginGbp: 0 };
   }
   const extraMiles = Math.max(0, distanceMiles - config.baseDistanceMiles);
   const restaurantFeeGbp = round2(
-    config.baseRestaurantChargeGbp + extraMiles * config.extraMileRestaurantChargeGbp
+    feePerDelivery(config, customFeeGbp) + extraMiles * config.extraMileRestaurantChargeGbp
   );
   const stepIndex = Math.max(
     0,
@@ -108,11 +121,12 @@ async function updateConfig(partial, userId) {
     );
 
     const live = await client.query(
-      `SELECT id, distance_miles, batch_position FROM orders
-        WHERE status NOT IN ('delivered', 'cancelled') AND dispatch_type = 'open_platform' FOR UPDATE`
+      `SELECT o.id, o.distance_miles, o.batch_position, r.custom_fee_gbp FROM orders o
+         JOIN restaurants r ON r.id = o.restaurant_id
+        WHERE o.status NOT IN ('delivered', 'cancelled') AND o.dispatch_type = 'open_platform' FOR UPDATE OF o`
     );
     for (const o of live.rows) {
-      const fin = calculateOrderFinancials(next, Number(o.distance_miles), o.batch_position, 'open_platform');
+      const fin = calculateOrderFinancials(next, Number(o.distance_miles), o.batch_position, 'open_platform', o.custom_fee_gbp);
       await client.query(
         'UPDATE orders SET restaurant_fee_gbp = $1, driver_payout_gbp = $2 WHERE id = $3',
         [fin.restaurantFeeGbp, fin.driverPayoutGbp, o.id]
@@ -122,4 +136,44 @@ async function updateConfig(partial, userId) {
   });
 }
 
-module.exports = { getConfig, calculateOrderFinancials, buildSummary, updateConfig, round2 };
+/**
+ * Admin: sets (or clears, with null) one merchant's own per-delivery fee and re-prices that
+ * merchant's undelivered platform orders, so their credits are counted at the new fee.
+ */
+async function setCustomFee(restaurantId, customFeeGbp) {
+  return db.withTransaction(async (client) => {
+    const { rowCount } = await client.query(
+      'UPDATE restaurants SET custom_fee_gbp = $1, updated_at = now() WHERE id = $2',
+      [customFeeGbp, restaurantId]
+    );
+    if (rowCount === 0) {
+      throw new AppError(404, 'RESTAURANT_NOT_FOUND', 'Restaurant not found.');
+    }
+    const config = await getConfig(client);
+    const live = await client.query(
+      `SELECT id, distance_miles, batch_position FROM orders
+        WHERE restaurant_id = $1 AND status NOT IN ('delivered', 'cancelled') AND dispatch_type = 'open_platform'
+        FOR UPDATE`,
+      [restaurantId]
+    );
+    for (const o of live.rows) {
+      const fin = calculateOrderFinancials(config, Number(o.distance_miles), o.batch_position, 'open_platform', customFeeGbp);
+      await client.query('UPDATE orders SET restaurant_fee_gbp = $1, driver_payout_gbp = $2 WHERE id = $3', [
+        fin.restaurantFeeGbp,
+        fin.driverPayoutGbp,
+        o.id,
+      ]);
+    }
+  });
+}
+
+module.exports = {
+  getConfig,
+  calculateOrderFinancials,
+  feePerDelivery,
+  customFeeOf,
+  setCustomFee,
+  buildSummary,
+  updateConfig,
+  round2,
+};

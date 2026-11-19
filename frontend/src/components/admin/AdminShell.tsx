@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   BadgePoundSterling,
   ChevronDown,
+  Coins,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -31,7 +32,8 @@ export const NAV = [
   { href: "/admin/orders", label: "Live orders", sub: "Dispatch & controls", icon: ReceiptText },
   { href: "/admin/pricing", label: "Pricing", sub: "Fees & batch payouts", icon: BadgePoundSterling },
   { href: "/admin/drivers", label: "Drivers", sub: "Approve & contract", icon: ShieldCheck },
-  { href: "/admin/merchants", label: "Merchants", sub: "Partners & policies", icon: Store },
+  { href: "/admin/merchants", label: "Merchants", sub: "Partners, fees & access", icon: Store },
+  { href: "/admin/credits", label: "Credits", sub: "Payments & usage", icon: Coins },
 ] as const;
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
@@ -150,7 +152,12 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () =>
   const pathname = usePathname();
   const { data, orders } = useAdmin();
   const live = orders.filter(isLive);
+  const lowCredits =
+    data?.restaurants.filter(
+      (r) => r.isActive !== false && (r.credits?.available ?? 0) < (r.feePerDeliveryGbp ?? 0)
+    ).length ?? 0;
   const counts: Record<string, { n: number; alert?: boolean } | undefined> = {
+    "/admin/credits": { n: lowCredits, alert: true },
     "/admin/orders": { n: live.length, alert: live.some((o) => o.attention) },
     "/admin/drivers": {
       n:

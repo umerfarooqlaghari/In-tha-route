@@ -22,9 +22,17 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 function pinHtml(p: MapPin) {
   if (p.kind === "driver") {
+    const c = p.color ?? "#2F6FED";
+    if (p.label) {
+      // A rider with initials (the merchant's own riders map).
+      return `<div style="position:relative;width:40px;height:40px">
+        <span style="position:absolute;inset:-4px;border-radius:999px;background:${c};opacity:.25;animation:pulse-ring 1.8s infinite"></span>
+        <span style="position:absolute;inset:0;border-radius:999px;background:${c};border:3px solid #fff;box-shadow:0 6px 16px rgb(0 0 0/.3);display:grid;place-items:center;color:#fff;font:800 12px/1 var(--font-sans)">${esc(p.label)}</span>
+      </div>`;
+    }
     return `<div style="position:relative;width:34px;height:34px">
-      <span style="position:absolute;inset:0;border-radius:999px;background:#2F6FED;opacity:.25;animation:pulse-ring 1.8s infinite"></span>
-      <span style="position:absolute;inset:7px;border-radius:999px;background:#2F6FED;border:3px solid #fff;box-shadow:0 4px 14px rgb(47 111 237/.6)"></span>
+      <span style="position:absolute;inset:0;border-radius:999px;background:${c};opacity:.25;animation:pulse-ring 1.8s infinite"></span>
+      <span style="position:absolute;inset:7px;border-radius:999px;background:${c};border:3px solid #fff;box-shadow:0 4px 14px rgb(0 0 0/.35)"></span>
     </div>`;
   }
   if (p.kind === "restaurant") {
@@ -45,7 +53,16 @@ const SIZE: Record<MapPin["kind"], [number, number]> = { driver: [34, 34], resta
  * drivers with a recent GPS position. Pins update in place on every refresh;
  * the view frames all pins the first time they arrive.
  */
-export function LiveMap({ pins, className }: { pins: MapPin[]; className?: string }) {
+export function LiveMap({
+  pins,
+  className,
+  focus,
+}: {
+  pins: MapPin[];
+  className?: string;
+  /** Pans to this spot whenever `focus.key` changes (e.g. a rider picked in a list). */
+  focus?: { key: string; lat: number; lng: number } | null;
+}) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layer = useRef<L.LayerGroup | null>(null);
@@ -59,9 +76,10 @@ export function LiveMap({ pins, className }: { pins: MapPin[]; className?: strin
     layer.current.clearLayers();
     const all = pinsRef.current;
     all.forEach((p) => {
-      const anchor: [number, number] = p.kind === "dropoff" ? [15, 37] : [17, 17];
+      const big = p.kind === "driver" && !!p.label;
+      const anchor: [number, number] = p.kind === "dropoff" ? [15, 37] : big ? [20, 20] : [17, 17];
       const marker = Lf.marker([p.lat, p.lng], {
-        icon: Lf.divIcon({ className: "itr-pin", html: pinHtml(p), iconSize: SIZE[p.kind], iconAnchor: anchor }),
+        icon: Lf.divIcon({ className: "itr-pin", html: pinHtml(p), iconSize: big ? [40, 40] : SIZE[p.kind], iconAnchor: anchor }),
         zIndexOffset: p.kind === "driver" ? 1000 : p.kind === "dropoff" ? 500 : 0,
         keyboard: false,
       });
@@ -115,12 +133,19 @@ export function LiveMap({ pins, className }: { pins: MapPin[]; className?: strin
   }, []);
 
   // Redraw when the pins change (cheap: a few dozen markers).
-  const signature = pins.map((p) => `${p.id}:${p.lat.toFixed(5)}:${p.lng.toFixed(5)}:${p.label ?? ""}`).join("|");
+  const signature = pins
+    .map((p) => `${p.id}:${p.lat.toFixed(5)}:${p.lng.toFixed(5)}:${p.label ?? ""}:${p.color ?? ""}:${(p.popup ?? []).join("/")}`)
+    .join("|");
   useEffect(() => {
     pinsRef.current = pins;
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
+
+  useEffect(() => {
+    if (focus && map.current) map.current.flyTo([focus.lat, focus.lng], Math.max(map.current.getZoom(), 14), { duration: 0.8 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.key]);
 
   // Keep tiles right when the container changes size (sidebar collapse, window resize).
   useEffect(() => {

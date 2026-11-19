@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const credits = require('./credits.service');
 const AppError = require('../utils/AppError');
 const { timeAgo, tripTimeLabel } = require('../utils/labels');
 const dispatch = require('./dispatch.service');
@@ -349,7 +350,7 @@ async function createOrder(user, input) {
   }
 
   const dropoff = await locateDropoff(restaurant, input.deliveryAddress, input.postcode, config);
-  const fin = pricing.calculateOrderFinancials(config, dropoff.distanceMiles, 1, dispatchType);
+  const fin = pricing.calculateOrderFinancials(config, dropoff.distanceMiles, 1, dispatchType, restaurant.custom_fee_gbp);
 
   const orderId = await db.withTransaction(async (client) => {
     // One post at a time per order number, so two taps at once cannot both get through.
@@ -359,6 +360,13 @@ async function createOrder(user, input) {
       ]);
       await rejectDuplicate(client, restaurant.id, input);
     }
+    // Out of credits: no order can be posted, whoever delivers it. Own-driver orders use no credits.
+    await credits.assertCanPost(
+      client,
+      restaurant.id,
+      fin.restaurantFeeGbp,
+      pricing.feePerDelivery(config, restaurant.custom_fee_gbp)
+    );
     const receiptFileId = await claimReceiptPhoto(client, user.id, input.receiptFileId);
     const { rows } = await client.query(
       `INSERT INTO orders (

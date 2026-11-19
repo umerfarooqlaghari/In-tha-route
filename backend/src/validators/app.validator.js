@@ -112,6 +112,33 @@ const cancelSchema = z.object({ reason: z.string().trim().max(300).default('') }
 const uuidSchema = z.uuid('Invalid id.');
 const assignDriverSchema = z.object({ ownDriverId: z.uuid('Choose one of your drivers.') });
 
+// Credits (1 credit = £1).
+const buyCreditsSchema = z.object({
+  amountGbp: z.coerce
+    .number({ error: 'Enter an amount.' })
+    .min(10, 'The smallest top-up is £10.')
+    .max(5000, 'The largest top-up is £5,000.')
+    .refine((n) => Number.isInteger(Math.round(n * 100)) && Math.abs(n * 100 - Math.round(n * 100)) < 1e-6, 'Use whole pence.'),
+  returnUrl: z.string().trim().max(500).optional(),
+});
+const confirmCheckoutSchema = z.object({ sessionId: z.string().trim().min(5).max(255) });
+const adjustCreditsSchema = z.object({
+  credits: z.coerce
+    .number({ error: 'Enter the number of credits.' })
+    .refine((n) => n !== 0, 'Enter a number other than 0.')
+    .refine((n) => Math.abs(n) <= 100000, 'That is too many credits.'),
+  note: z.string().trim().max(200).default(''),
+});
+const customFeeSchema = z.object({
+  // null: back to the standard fee for every merchant.
+  customFeeGbp: z.union([z.null(), z.coerce.number().min(0, 'The fee cannot be negative.').max(100, 'The fee is too high.')]),
+});
+const merchantStatusSchema = z.object({ active: z.boolean({ error: 'active must be true or false.' }) });
+const creditsListSchema = z.object({
+  kind: z.enum(['purchase', 'grant', 'adjustment', 'delivery']).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+
 module.exports = {
   imageSchema,
   createOrderSchema,
@@ -126,4 +153,10 @@ module.exports = {
   cancelSchema,
   uuidSchema,
   assignDriverSchema,
+  buyCreditsSchema,
+  confirmCheckoutSchema,
+  adjustCreditsSchema,
+  customFeeSchema,
+  merchantStatusSchema,
+  creditsListSchema,
 };

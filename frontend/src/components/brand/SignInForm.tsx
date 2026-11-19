@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui";
 import { Field } from "@/components/ui/field";
-import { ApiError, errorMessage, getSession, loginRequest, request, saveSession, type Portal } from "@/lib/api";
+import { ApiError, DISABLED_MESSAGE, errorMessage, getSession, loginRequest, request, saveSession, takeNotice, type Portal } from "@/lib/api";
 import type { UserRole } from "@/lib/types";
 import { FormError } from "./AuthShell";
 
@@ -34,9 +34,15 @@ export function SignInForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Already signed in on this browser: go straight in.
+  // Already signed in on this browser: go straight in. Otherwise say why the last session ended, if it was ended for us.
   useEffect(() => {
     if (getSession(portal)?.user.role === role) router.replace(redirectTo);
+    else {
+      const notice = takeNotice(portal);
+      // Read from this tab's storage, which the server render can't see.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (notice) setFormError(notice);
+    }
   }, [portal, role, redirectTo, router]);
 
   const submit = async (e: React.FormEvent) => {
@@ -61,7 +67,8 @@ export function SignInForm({
       saveSession(portal, session);
       router.replace(redirectTo);
     } catch (err) {
-      if (err instanceof ApiError && Object.keys(err.fields).length) setErrors(err.fields);
+      if (err instanceof ApiError && err.code === "ACCOUNT_DISABLED") setFormError(DISABLED_MESSAGE);
+      else if (err instanceof ApiError && Object.keys(err.fields).length) setErrors(err.fields);
       else setFormError(errorMessage(err));
       setLoading(false);
     }

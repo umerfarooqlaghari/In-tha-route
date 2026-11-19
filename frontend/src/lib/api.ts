@@ -180,7 +180,8 @@ function renew(portal: Portal): Promise<StoredSession> {
       saveSession(portal, next);
       return getSession(portal)!;
     } catch (err) {
-      if (err instanceof ApiError && err.code !== "NETWORK_ERROR") write(portal, null);
+      if (err instanceof ApiError && err.code === "ACCOUNT_DISABLED") endDisabled(portal);
+      else if (err instanceof ApiError && err.code !== "NETWORK_ERROR") write(portal, null);
       throw err;
     }
   }).finally(() => {
@@ -188,6 +189,35 @@ function renew(portal: Portal): Promise<StoredSession> {
   });
   refreshing[portal] = p;
   return p;
+}
+
+/* A note for the sign-in page, e.g. why the session ended. Lives for this tab only. */
+const noticeKey = (portal: Portal) => `itr.notice.${portal}`;
+
+export function setNotice(portal: Portal, message: string) {
+  try {
+    window.sessionStorage.setItem(noticeKey(portal), message);
+  } catch {}
+}
+
+/** Reads the note once and forgets it. */
+export function takeNotice(portal: Portal): string | null {
+  try {
+    const m = window.sessionStorage.getItem(noticeKey(portal));
+    window.sessionStorage.removeItem(noticeKey(portal));
+    return m;
+  } catch {
+    return null;
+  }
+}
+
+export const DISABLED_MESSAGE =
+  "This account has been disabled by In Tha Route. Contact support if you think this is a mistake.";
+
+/** The admin disabled this account: sign out here and say why on the sign-in page. */
+export function endDisabled(portal: Portal) {
+  setNotice(portal, DISABLED_MESSAGE);
+  write(portal, null);
 }
 
 /** A valid access token, renewed if needed. */
@@ -210,7 +240,7 @@ export async function api<T>(portal: Portal, method: HttpMethod, path: string, b
       const next = await renew(portal);
       return request<T>(method, path, body, next.accessToken ?? undefined);
     }
-    if (err instanceof ApiError && err.code === "ACCOUNT_DISABLED") write(portal, null);
+    if (err instanceof ApiError && err.code === "ACCOUNT_DISABLED") endDisabled(portal);
     throw err;
   }
 }

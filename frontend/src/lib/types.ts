@@ -118,6 +118,170 @@ export interface RestaurantPartner {
   completedTodayCount: number;
   pickupSafetyNote: string;
   coords?: LatLng | null;
+  /** Admin dashboard only. */
+  isActive?: boolean;
+  ownerName?: string;
+  ownerEmail?: string;
+  /** The fee the admin set for this merchant; null means the standard fee. */
+  customFeeGbp?: number | null;
+  feePerDeliveryGbp?: number;
+  credits?: MerchantCreditTotals;
+}
+
+/** Per-merchant credit totals on the admin dashboard. */
+export interface MerchantCreditTotals {
+  balance: number;
+  held: number;
+  available: number;
+  addedCredits: number;
+  purchasedCredits: number;
+  usedCredits: number;
+  paidGbp: number;
+  lastPurchaseAt: string | null;
+  deliveriesLeft: number | null;
+}
+
+/** A merchant's own credits (1 credit = £1). */
+export interface CreditSummary {
+  balance: number;
+  /** Fees of live platform orders, taken when each is delivered. */
+  held: number;
+  available: number;
+  feePerDeliveryGbp: number;
+  customFee: boolean;
+  deliveriesLeft: number | null;
+  addedCredits: number;
+  usedCredits: number;
+  paidGbp: number;
+  deliveriesCharged: number;
+  paymentsEnabled: boolean;
+  packsGbp: number[];
+  minPurchaseGbp: number;
+  maxPurchaseGbp: number;
+}
+
+export type CreditKind = "purchase" | "grant" | "adjustment" | "delivery";
+
+export interface CreditTransaction {
+  id: string;
+  restaurantId: string;
+  restaurantName: string;
+  kind: CreditKind;
+  credits: number;
+  amountPaidGbp: number | null;
+  orderId?: string;
+  externalOrderId?: string;
+  note: string;
+  createdByName?: string;
+  createdAt: string;
+}
+
+/** A scanned receipt, waiting for the merchant to check and post it. */
+export interface ReceiptTemplate {
+  id: string;
+  source: OrderSource;
+  externalOrderId: string;
+  restaurantId: string;
+  restaurantName: string;
+  restaurantAddress: string;
+  restaurantPostcode: string;
+  customerName: string;
+  customerPhone: string;
+  phoneAccessCode?: string;
+  directCustomerPhone?: string;
+  deliveryAddress: string;
+  postcode: string;
+  deliveryInstructions: string;
+  restaurantPickupNote: string;
+  distanceMiles: number;
+  suggestedPrepMinutes: number;
+  orderTotalGbp: number;
+  items: OrderItem[];
+  estimatedFeeGbp: number;
+  receiptFileId?: string;
+  pickupCoords?: LatLng | null;
+  dropoffCoords?: LatLng | null;
+}
+
+/** What `GET /api/restaurant/dashboard` returns. Change endpoints return `{ dashboard }`. */
+export interface MerchantDashboard {
+  role: "restaurant";
+  activeRestaurantId: string;
+  restaurants: RestaurantPartner[];
+  orders: LiveOrder[];
+  drivers: DriverProfile[];
+  algorithm: AlgorithmConfig;
+  credits?: CreditSummary;
+}
+
+export interface PastOrder extends LiveOrder {
+  createdAt: string;
+  pickedUpAt: string | null;
+  deliveredAt: string | null;
+  deliveredLabel?: string;
+  // Newer servers also list orders cancelled after collection; older ones send only the delivered fields.
+  cancelledAt?: string | null;
+  finishedAt?: string;
+  finishedLabel?: string;
+  totalMinutes: number | null;
+  deliveryMinutes: number | null;
+}
+
+export interface HistoryPage {
+  orders: PastOrder[];
+  totals: { orders: number; salesGbp: number; feesGbp: number };
+  nextBefore: string | null;
+}
+
+export interface MerchantAnalytics {
+  days: number;
+  summary: {
+    orders: number;
+    salesGbp: number;
+    feesGbp: number;
+    averageOrderGbp: number;
+    cancelled: number;
+    active: number;
+    completionRate: number | null;
+    deliveryMinutes: number | null;
+    totalMinutes: number | null;
+    prepMinutes: number | null;
+  };
+  previous: { orders: number; salesGbp: number };
+  daily: { date: string; weekday: string; orders: number; salesGbp: number }[];
+  hours: { hour: number; orders: number }[];
+  drivers: { own: number; platform: number };
+  topItems: { name: string; quantity: number }[];
+}
+
+export type ChatRole = "restaurant" | "driver";
+
+export interface Conversation {
+  id: string;
+  counterpart: {
+    userId: string;
+    role: ChatRole;
+    name: string;
+    phone: string;
+    subtitle: string;
+    online: boolean;
+    lastSeenAt: string | null;
+  };
+  lastMessage: { body: string; senderRole: ChatRole; createdAt: string } | null;
+  unreadCount: number;
+  canMessage: boolean;
+  activeOrders: string[];
+  otherLastReadAt: string | null;
+  updatedAt: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  body: string;
+  senderRole: ChatRole;
+  createdAt: string;
+  pending?: "sending" | "failed";
 }
 
 export interface AlgorithmConfig {

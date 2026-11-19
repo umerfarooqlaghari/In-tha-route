@@ -1,13 +1,14 @@
 "use client";
 
 import { motion } from "motion/react";
-import { CheckCheck, Info, MapPin, Phone, Search, Store, Zap } from "lucide-react";
+import { Ban, CheckCheck, Coins, Info, MapPin, Pencil, Phone, Power, Search, Store, UserRound, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { Card, EmptyState, Segmented, Skeleton } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, EmptyState, Segmented, Skeleton } from "@/components/ui";
 import { useAdmin } from "@/lib/admin-store";
-import { shortName } from "@/lib/format";
-import type { DriverPolicy } from "@/lib/types";
+import { cn, formatGbp, shortName } from "@/lib/format";
+import type { DriverPolicy, RestaurantPartner } from "@/lib/types";
+import { CreditAdjustDialog, FeeDialog } from "./MerchantDialogs";
 
 const POLICY_HELP: Record<DriverPolicy, string> = {
   open_platform: "Orders go to platform drivers.",
@@ -16,14 +17,17 @@ const POLICY_HELP: Record<DriverPolicy, string> = {
 };
 
 export function MerchantsScreen() {
-  const { data, updatePolicy } = useAdmin();
+  const { data, updatePolicy, setMerchantActive } = useAdmin();
   const [query, setQuery] = useState("");
+  const [feeFor, setFeeFor] = useState<RestaurantPartner | null>(null);
+  const [creditsFor, setCreditsFor] = useState<RestaurantPartner | null>(null);
+  const [toggleFor, setToggleFor] = useState<RestaurantPartner | null>(null);
   const restaurants = data?.restaurants;
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (restaurants ?? []).filter(
-      (r) => !q || [r.name, r.address, r.postcode, r.phone].join(" ").toLowerCase().includes(q)
+      (r) => !q || [r.name, r.address, r.postcode, r.phone, r.ownerName ?? "", r.ownerEmail ?? ""].join(" ").toLowerCase().includes(q)
     );
   }, [restaurants, query]);
 
@@ -60,6 +64,11 @@ export function MerchantsScreen() {
             <span className="rounded-full bg-surface-alt px-3 py-1.5 text-ink-2">Platform · {counts.open_platform}</span>
             <span className="rounded-full bg-surface-alt px-3 py-1.5 text-ink-2">Hybrid · {counts.hybrid}</span>
             <span className="rounded-full bg-surface-alt px-3 py-1.5 text-ink-2">Own · {counts.own_drivers}</span>
+            {data.restaurants.some((r) => r.isActive === false) && (
+              <span className="rounded-full bg-brand-soft px-3 py-1.5 text-brand">
+                Disabled · {data.restaurants.filter((r) => r.isActive === false).length}
+              </span>
+            )}
           </div>
         </div>
       </Card>
@@ -76,9 +85,19 @@ export function MerchantsScreen() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: Math.min(i, 9) * 0.05, ease: [0.22, 1, 0.36, 1] }}
-              className="group overflow-hidden rounded-3xl border border-line bg-surface shadow-[var(--shadow-card)] transition-shadow hover:shadow-[0_20px_50px_-24px_rgb(0_0_0/0.3)]"
+              className={cn(
+                "group overflow-hidden rounded-3xl border bg-surface shadow-[var(--shadow-card)] transition-shadow hover:shadow-[0_20px_50px_-24px_rgb(0_0_0/0.3)]",
+                r.isActive === false ? "border-brand-line" : "border-line"
+              )}
             >
-              <div className="brand-gradient relative h-16 overflow-hidden">
+              <div className={cn("relative h-16 overflow-hidden", r.isActive === false ? "bg-ink-3" : "brand-gradient")}>
+                {r.isActive === false && (
+                  <span className="absolute top-3 right-3 z-10">
+                    <Badge tone="brand" className="bg-white">
+                      <Ban className="size-3" /> Disabled
+                    </Badge>
+                  </span>
+                )}
                 <svg className="absolute inset-0 h-full w-full opacity-40" preserveAspectRatio="none" viewBox="0 0 300 60" aria-hidden>
                   <path d="M-10 45 C 60 10, 120 60, 190 25 S 280 5, 320 30" fill="none" stroke="#F5B014" strokeWidth="1.5" strokeDasharray="5 7" className="animate-dash" />
                 </svg>
@@ -98,6 +117,11 @@ export function MerchantsScreen() {
                   {r.phone && (
                     <p className="flex items-center gap-1.5">
                       <Phone className="size-3.5 shrink-0" /> {r.phone}
+                    </p>
+                  )}
+                  {(r.ownerName || r.ownerEmail) && (
+                    <p className="flex items-center gap-1.5 truncate">
+                      <UserRound className="size-3.5 shrink-0" /> {[r.ownerName, r.ownerEmail].filter(Boolean).join(" · ")}
                     </p>
                   )}
                 </div>
@@ -136,11 +160,66 @@ export function MerchantsScreen() {
                     <b className="text-warning">Pickup note:</b> {r.pickupSafetyNote}
                   </p>
                 )}
+
+                <div className="mt-5 grid grid-cols-2 gap-2.5">
+                  <button
+                    onClick={() => setFeeFor(r)}
+                    className="group/fee rounded-2xl border border-line p-3 text-left transition hover:border-ink-3"
+                  >
+                    <p className="flex items-center justify-between text-[11px] font-bold tracking-[0.12em] text-ink-3 uppercase">
+                      Fee <Pencil className="size-3.5 opacity-0 transition group-hover/fee:opacity-100" />
+                    </p>
+                    <p className="mt-1 text-lg font-extrabold text-ink tabular">{formatGbp(r.feePerDeliveryGbp ?? data.algorithm.baseRestaurantChargeGbp)}</p>
+                    <p className={cn("text-[12px] font-semibold", r.customFeeGbp != null ? "text-info" : "text-ink-3")}>
+                      {r.customFeeGbp != null ? "Custom rate" : "Standard"}
+                    </p>
+                  </button>
+                  <button
+                    onClick={() => setCreditsFor(r)}
+                    className="group/cr rounded-2xl border border-line p-3 text-left transition hover:border-ink-3"
+                  >
+                    <p className="flex items-center justify-between text-[11px] font-bold tracking-[0.12em] text-ink-3 uppercase">
+                      Credits <Pencil className="size-3.5 opacity-0 transition group-hover/cr:opacity-100" />
+                    </p>
+                    <p
+                      className={cn(
+                        "mt-1 flex items-center gap-1.5 text-lg font-extrabold tabular",
+                        (r.credits?.available ?? 0) < (r.feePerDeliveryGbp ?? 0) ? "text-brand" : "text-ink"
+                      )}
+                    >
+                      <Coins className="size-4 text-road" /> {(r.credits?.available ?? 0).toFixed(2)}
+                    </p>
+                    <p className="text-[12px] font-semibold text-ink-3">
+                      {r.credits?.deliveriesLeft == null ? "—" : `≈ ${r.credits.deliveriesLeft} deliveries`} · {(r.credits?.usedCredits ?? 0).toFixed(0)} used
+                    </p>
+                  </button>
+                </div>
+
+                <Button
+                  size="sm"
+                  variant={r.isActive === false ? "success" : "ghost"}
+                  icon={<Power className="size-4" />}
+                  className={cn("mt-4 w-full", r.isActive !== false && "text-brand ring-1 ring-brand-line hover:bg-brand-soft hover:text-brand")}
+                  onClick={() => (r.isActive === false ? setMerchantActive(r.id, true) : setToggleFor(r))}
+                >
+                  {r.isActive === false ? "Enable merchant" : "Disable merchant"}
+                </Button>
               </div>
             </motion.div>
           ))}
         </div>
       )}
+
+      <FeeDialog merchant={feeFor} onClose={() => setFeeFor(null)} />
+      <CreditAdjustDialog merchant={creditsFor} onClose={() => setCreditsFor(null)} />
+      <ConfirmDialog
+        open={!!toggleFor}
+        title={`Disable ${toggleFor ? shortName(toggleFor.name) : "this merchant"}?`}
+        body="They are signed out on the web and in the app straight away and can’t sign in until you enable them again. Their orders, drivers and credits are kept."
+        confirmLabel="Disable"
+        onConfirm={() => (toggleFor ? setMerchantActive(toggleFor.id, false) : undefined)}
+        onClose={() => setToggleFor(null)}
+      />
     </div>
   );
 }
