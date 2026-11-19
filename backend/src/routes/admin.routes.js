@@ -14,7 +14,7 @@ router.get('/dashboard', h(c.dashboard)); // live orders, totals, drivers, resta
 router.put('/pricing', h(c.updatePricing)); // fees, payouts, batching rules
 router.post('/drivers/:id/approve', h(c.approveDriver));
 router.post('/drivers/:id/reject', h(c.rejectDriver));
-router.patch('/restaurants/:id/policy', h(c.updateRestaurantPolicy));
+// Who delivers is the merchant's own choice (PATCH /api/restaurant/policy); admins can't change it.
 router.patch('/restaurants/:id/fee', h(c.updateRestaurantFee)); // this merchant's own per-delivery fee (null: standard)
 router.patch('/restaurants/:id/status', h(c.updateRestaurantStatus)); // disable / enable the merchant's account
 router.post('/restaurants/:id/credits', h(c.adjustRestaurantCredits)); // add or remove credits by hand

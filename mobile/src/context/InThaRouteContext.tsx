@@ -182,6 +182,58 @@ export interface RestaurantPartner {
   completedTodayCount: number;
   pickupSafetyNote: string;
   coords?: LatLng | null;
+  /** Admin dashboard only. */
+  isActive?: boolean;
+  ownerName?: string;
+  ownerEmail?: string;
+  /** The fee the admin set for this merchant; null means the standard fee. */
+  customFeeGbp?: number | null;
+  feePerDeliveryGbp?: number;
+  credits?: MerchantCreditTotals;
+}
+
+/** Per-merchant credit totals on the admin dashboard (1 credit = £1). */
+export interface MerchantCreditTotals {
+  balance: number;
+  held: number;
+  available: number;
+  addedCredits: number;
+  purchasedCredits: number;
+  usedCredits: number;
+  paidGbp: number;
+  lastPurchaseAt: string | null;
+  deliveriesLeft: number | null;
+}
+
+/** A merchant's own credits. Bought on the web; the app only shows them. */
+export interface CreditSummary {
+  balance: number;
+  /** Fees of live platform orders, taken when each is delivered. */
+  held: number;
+  available: number;
+  feePerDeliveryGbp: number;
+  customFee: boolean;
+  deliveriesLeft: number | null;
+  addedCredits: number;
+  usedCredits: number;
+  paidGbp: number;
+  deliveriesCharged: number;
+}
+
+export type CreditKind = 'purchase' | 'grant' | 'adjustment' | 'delivery';
+
+export interface CreditTransaction {
+  id: string;
+  restaurantId: string;
+  restaurantName: string;
+  kind: CreditKind;
+  credits: number;
+  amountPaidGbp: number | null;
+  orderId?: string;
+  externalOrderId?: string;
+  note: string;
+  createdByName?: string;
+  createdAt: string;
 }
 
 export interface AlgorithmConfig {
@@ -261,6 +313,8 @@ interface Dashboard {
   capacity?: DriverCapacity;
   pricingSummary?: PricingSummary;
   totals?: AdminTotals;
+  /** Restaurant: its credits. */
+  credits?: CreditSummary;
 }
 
 export interface RoleScreen {
@@ -276,8 +330,10 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
     { key: 'live_orders', title: 'Live orders', subtitle: 'Prep timers & couriers', icon: 'time-outline' },
     { key: 'past_orders', title: 'Past orders', subtitle: 'Delivered orders', icon: 'receipt-outline' },
     { key: 'analytics', title: 'Analytics', subtitle: 'Sales, orders & trends', icon: 'stats-chart-outline' },
+    { key: 'live_riders', title: 'Live riders', subtitle: 'Your drivers on the map', icon: 'locate-outline' },
     { key: 'messages', title: 'Messages', subtitle: 'Chats with drivers', icon: 'chatbubbles-outline' },
     { key: 'own_drivers', title: 'My drivers', subtitle: 'Your in-house team', icon: 'people-outline' },
+    { key: 'credits', title: 'Credits', subtitle: 'Balance & usage', icon: 'wallet-outline' },
     { key: 'dispatch_policy', title: 'Delivery settings', subtitle: 'Who delivers your orders', icon: 'options-outline' },
   ],
   driver: [
@@ -294,6 +350,7 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
     { key: 'pricing_algorithm', title: 'Pricing', subtitle: 'Fees & batch payouts', icon: 'calculator-outline' },
     { key: 'driver_kyc', title: 'Drivers', subtitle: 'Approve & contract', icon: 'shield-checkmark-outline' },
     { key: 'partner_restaurants', title: 'Merchants', subtitle: 'Partners & policies', icon: 'storefront-outline' },
+    { key: 'admin_credits', title: 'Credits', subtitle: 'Payments & usage', icon: 'wallet-outline' },
   ],
 };
 
@@ -426,6 +483,15 @@ interface InThaRouteContextType {
   rejectDriverKyc: (driverId: string, reason?: string) => Promise<boolean>;
   updateAlgorithmConfig: (partial: Partial<AlgorithmConfig>) => Promise<boolean>;
   updateSteppedPayoutAt: (orderPositionIndex: number, amountGbp: number) => Promise<boolean>;
+  /** Admin: this merchant's own per-delivery fee (null: back to the standard fee). */
+  updateMerchantFee: (restaurantId: string, feeGbp: number | null) => Promise<boolean>;
+  /** Admin: turn a merchant's account off (signed out everywhere) or back on. */
+  setMerchantActive: (restaurantId: string, active: boolean) => Promise<boolean>;
+  /** Admin: add (positive) or remove (negative) credits by hand. */
+  adjustMerchantCredits: (restaurantId: string, credits: number, note: string) => Promise<boolean>;
+
+  /** Restaurant: its credits (null before the first dashboard). */
+  credits: CreditSummary | null;
 }
 
 const InThaRouteContext = createContext<InThaRouteContextType | undefined>(undefined);
@@ -804,8 +870,8 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
       ...d,
       restaurants: d.restaurants.map((r) => (r.id === restaurantId ? { ...r, driverPolicy: policy } : r)),
     }));
-    const path =
-      role === 'admin' ? `/api/admin/restaurants/${restaurantId}/policy` : '/api/restaurant/policy';
+    // Only the merchant chooses who delivers their orders.
+    const path = '/api/restaurant/policy';
     const ok = await attempt(() => call('PATCH', path, { driverPolicy: policy }));
     if (!ok && previous) {
       patchData((d) => ({
@@ -839,6 +905,15 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
     steps[orderPositionIndex] = Number(Math.max(0.5, amountGbp).toFixed(2));
     return updateAlgorithmConfig({ steppedDriverPayoutsGbp: steps });
   };
+
+  const updateMerchantFee = (restaurantId: string, feeGbp: number | null) =>
+    attempt(() => call('PATCH', `/api/admin/restaurants/${restaurantId}/fee`, { customFeeGbp: feeGbp }));
+
+  const setMerchantActive = (restaurantId: string, active: boolean) =>
+    attempt(() => call('PATCH', `/api/admin/restaurants/${restaurantId}/status`, { active }));
+
+  const adjustMerchantCredits = (restaurantId: string, credits: number, note: string) =>
+    attempt(() => call('POST', `/api/admin/restaurants/${restaurantId}/credits`, { credits, note }));
 
   return (
     <InThaRouteContext.Provider
@@ -895,6 +970,10 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         rejectDriverKyc,
         updateAlgorithmConfig,
         updateSteppedPayoutAt,
+        updateMerchantFee,
+        setMerchantActive,
+        adjustMerchantCredits,
+        credits: data?.credits ?? null,
       }}>
       {children}
     </InThaRouteContext.Provider>

@@ -4,11 +4,17 @@ import { motion } from "motion/react";
 import { Ban, CheckCheck, Coins, Info, MapPin, Pencil, Phone, Power, Search, Store, UserRound, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { Badge, Button, Card, ConfirmDialog, EmptyState, Segmented, Skeleton } from "@/components/ui";
+import { Badge, Button, Card, ConfirmDialog, EmptyState, Skeleton } from "@/components/ui";
 import { useAdmin } from "@/lib/admin-store";
 import { cn, formatGbp, shortName } from "@/lib/format";
 import type { DriverPolicy, RestaurantPartner } from "@/lib/types";
 import { CreditAdjustDialog, FeeDialog } from "./MerchantDialogs";
+
+const POLICY_LABEL: Record<DriverPolicy, string> = {
+  open_platform: "Platform drivers",
+  hybrid: "Hybrid",
+  own_drivers: "Own drivers only",
+};
 
 const POLICY_HELP: Record<DriverPolicy, string> = {
   open_platform: "Orders go to platform drivers.",
@@ -17,7 +23,7 @@ const POLICY_HELP: Record<DriverPolicy, string> = {
 };
 
 export function MerchantsScreen() {
-  const { data, updatePolicy, setMerchantActive } = useAdmin();
+  const { data, setMerchantActive } = useAdmin();
   const [query, setQuery] = useState("");
   const [feeFor, setFeeFor] = useState<RestaurantPartner | null>(null);
   const [creditsFor, setCreditsFor] = useState<RestaurantPartner | null>(null);
@@ -142,16 +148,11 @@ export function MerchantsScreen() {
                 </div>
 
                 <p className="mt-5 mb-2 text-[11px] font-bold tracking-[0.14em] text-ink-3 uppercase">Who delivers</p>
-                <Segmented<DriverPolicy>
-                  value={r.driverPolicy}
-                  onChange={(p) => updatePolicy(r.id, p)}
-                  size="sm"
-                  options={[
-                    { value: "open_platform", label: "Platform" },
-                    { value: "hybrid", label: "Hybrid" },
-                    { value: "own_drivers", label: "Own" },
-                  ]}
-                />
+                {/* Who delivers is the merchant's own choice (their Delivery settings); admins only see it. */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone="info">{POLICY_LABEL[r.driverPolicy]}</Badge>
+                  <span className="text-[12px] font-semibold text-ink-3">Set by the merchant</span>
+                </div>
                 <p className="mt-2 flex items-start gap-1.5 text-[12px] text-ink-3">
                   <Info className="mt-px size-3.5 shrink-0" /> {POLICY_HELP[r.driverPolicy]}
                 </p>

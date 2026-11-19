@@ -106,12 +106,6 @@ async function creditActivity(req, res) {
   res.json({ transactions: await credits.recentTransactions({ kind, limit }) });
 }
 
-async function updateRestaurantPolicy(req, res) {
-  const { driverPolicy } = parse(v.policySchema, req.body);
-  await restaurants.updatePolicy(parse(v.uuidSchema, req.params.id), driverPolicy);
-  res.json({ dashboard: await buildDashboard() });
-}
-
 /** Cancels an order that is not delivered yet (even one the driver has collected). */
 async function cancelOrder(req, res) {
   const orderId = parse(v.uuidSchema, req.params.id);
@@ -149,7 +143,6 @@ module.exports = {
   updatePricing,
   approveDriver,
   rejectDriver,
-  updateRestaurantPolicy,
   updateRestaurantFee,
   updateRestaurantStatus,
   adjustRestaurantCredits,

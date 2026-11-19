@@ -250,8 +250,8 @@ function DriverCard({ d, delay }: { d: DriverProfile; delay: number }) {
       </div>
       <div className="mt-4 space-y-1 text-sm text-ink-2">
         {d.email && (
-          <p className="flex items-center gap-2 truncate">
-            <Mail className="size-4 shrink-0 text-ink-3" /> {d.email}
+          <p className="flex items-center gap-2">
+            <Mail className="size-4 shrink-0 text-ink-3" /> <span className="min-w-0 truncate">{d.email}</span>
           </p>
         )}
         {d.phone && (

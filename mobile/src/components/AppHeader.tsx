@@ -12,7 +12,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isLowOnCredits } from '@/components/admin/AdminCredits';
 import { Avatar, IconButton } from '@/components/ui';
+import { CreditsPill } from '@/components/restaurant/MerchantCredits';
 import { Brand } from '@/constants/brand';
 import { PERSONAS } from '@/constants/personas';
 import { useChat } from '@/context/ChatContext';
@@ -33,25 +35,34 @@ export function AppHeader() {
   const persona = PERSONAS[role];
 
   const topPad = Math.max(insets.top, 48) + 12;
+  const [leftW, setLeftW] = useState(40);
+  const [rightW, setRightW] = useState(40);
+  const side = Math.max(leftW, rightW) + 8;
 
   return (
     <>
         <View style={[styles.header, { paddingTop: topPad }]}>
-          <View>
-            <IconButton icon="menu" label="Open menu" testID="open-menu" onPress={() => setDrawerOpen(true)} />
-            {(unreadTotal > 0 || adminAlert) && <View style={styles.menuDot} pointerEvents="none" />}
-          </View>
-          <View style={styles.titleWrap}>
-            <Text style={styles.title} numberOfLines={1}>
+          {/* The title is centred on the whole header (not just the gap between the side buttons). */}
+          <View
+            style={[styles.titleWrap, { top: topPad, left: 16 + side, right: 16 + side }]}
+            pointerEvents="none">
+            <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
               {screen.title}
             </Text>
             <Text style={styles.subtitle} numberOfLines={1}>
               {persona.label}
             </Text>
           </View>
-          <Pressable onPress={() => setDrawerOpen(true)} hitSlop={8}>
-            <Avatar name={user?.fullName ?? persona.name} tone="primary" size={40} />
-          </Pressable>
+          <View onLayout={(e) => setLeftW(e.nativeEvent.layout.width)}>
+            <IconButton icon="menu" label="Open menu" testID="open-menu" onPress={() => setDrawerOpen(true)} />
+            {(unreadTotal > 0 || adminAlert) && <View style={styles.menuDot} pointerEvents="none" />}
+          </View>
+          <View style={styles.right} onLayout={(e) => setRightW(e.nativeEvent.layout.width)}>
+            {role === 'restaurant' && <CreditsPill />}
+            <Pressable onPress={() => setDrawerOpen(true)} hitSlop={8}>
+              <Avatar name={user?.fullName ?? persona.name} tone="primary" size={40} />
+            </Pressable>
+          </View>
         </View>
         <Drawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} />
       </>
@@ -62,7 +73,7 @@ export function AppHeader() {
   const insets = useSafeAreaInsets();
       const {width} = useWindowDimensions();
       const drawerWidth = Math.min(320, width * 0.84);
-      const {role, activeScreen, setActiveScreen, logout, user, screens, orders, drivers} = useInThaRoute();
+      const {role, activeScreen, setActiveScreen, logout, user, screens, orders, drivers, restaurants, credits} = useInThaRoute();
       const {unreadTotal} = useChat();
       // Admin: live orders (red when any need attention) and drivers waiting for a document check.
       const adminLive = role === 'admin' ? orders.filter((o) => o.status !== 'delivered' && o.status !== 'cancelled') : [];
@@ -80,6 +91,14 @@ export function AppHeader() {
         if (key === 'messages' && unreadTotal > 0) return { count: unreadTotal };
         if (key === 'admin_orders' && adminLive.length > 0) return { count: adminLive.length, muted: !adminAttention };
         if (key === 'driver_kyc' && toReview > 0) return { count: toReview };
+        // Merchants without enough credits for one delivery can't post orders.
+        if (key === 'admin_credits' && role === 'admin') {
+          const low = restaurants.filter(isLowOnCredits).length;
+          if (low > 0) return { count: low };
+        }
+        if (key === 'credits' && role === 'restaurant' && credits && credits.available < credits.feePerDeliveryGbp) {
+          return { count: 1 };
+        }
         return null;
       };
       const persona = PERSONAS[role];
@@ -216,14 +235,15 @@ export function AppHeader() {
         header: {
         flexDirection: 'row',
       alignItems: 'center',
-      gap: 12,
+      justifyContent: 'space-between',
       paddingHorizontal: 16,
       paddingBottom: 12,
       backgroundColor: C.surface,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: C.line,
   },
-      titleWrap: {flex: 1, minWidth: 0, alignItems: 'center' },
+      titleWrap: {position: 'absolute', bottom: 12, alignItems: 'center', justifyContent: 'center' },
+      right: {flexDirection: 'row', alignItems: 'center', gap: 8 },
       title: {...Brand.type.heading, color: C.ink },
       subtitle: {fontSize: 12, color: C.ink3, marginTop: 1 },
 

@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { useToast } from "@/components/ui/toast";
 import { api, clearSession, errorMessage, getSession, onSessionChange } from "./api";
-import type { AdminDashboard, AlgorithmConfig, AuthUser, DriverPolicy, LiveOrder } from "./types";
+import type { AdminDashboard, AlgorithmConfig, AuthUser, LiveOrder } from "./types";
 
 /**
  * The admin's live state, shared by every admin page.
@@ -32,7 +32,6 @@ interface AdminState {
   releaseOrder: (id: string) => Promise<boolean>;
   approveDriver: (id: string) => Promise<boolean>;
   rejectDriver: (id: string, reason?: string) => Promise<boolean>;
-  updatePolicy: (restaurantId: string, policy: DriverPolicy) => Promise<boolean>;
   updateAlgorithm: (partial: Partial<AlgorithmConfig>) => Promise<boolean>;
   updateSteppedPayoutAt: (index: number, amountGbp: number) => Promise<boolean>;
   /** A merchant's own per-delivery fee; null goes back to the standard fee. */
@@ -161,23 +160,6 @@ export function AdminProvider({ user, children }: { user: AuthUser; children: Re
   const patch = (fn: (d: AdminDashboard) => AdminDashboard) =>
     setState((prev) => (prev.data ? { ...prev, data: fn(prev.data) } : prev));
 
-  const updatePolicy = async (restaurantId: string, policy: DriverPolicy) => {
-    const previous = state.data?.restaurants.find((r) => r.id === restaurantId)?.driverPolicy;
-    // Show the choice straight away; the server's answer replaces it.
-    patch((d) => ({
-      ...d,
-      restaurants: d.restaurants.map((r) => (r.id === restaurantId ? { ...r, driverPolicy: policy } : r)),
-    }));
-    const ok = await attempt("PATCH", `/api/admin/restaurants/${restaurantId}/policy`, { driverPolicy: policy });
-    if (!ok && previous) {
-      patch((d) => ({
-        ...d,
-        restaurants: d.restaurants.map((r) => (r.id === restaurantId ? { ...r, driverPolicy: previous } : r)),
-      }));
-    }
-    return ok;
-  };
-
   const updateAlgorithm = async (partial: Partial<AlgorithmConfig>) => {
     // Steppers can be clicked quickly: show the value now so the next click
     // builds on it. All money figures still come from the server's answer.
@@ -208,7 +190,6 @@ export function AdminProvider({ user, children }: { user: AuthUser; children: Re
     approveDriver: (id) => attempt("POST", `/api/admin/drivers/${id}/approve`, undefined, "Driver approved"),
     rejectDriver: (id, reason) =>
       attempt("POST", `/api/admin/drivers/${id}/reject`, reason ? { reason } : {}, "Driver rejected"),
-    updatePolicy,
     updateAlgorithm,
     updateSteppedPayoutAt,
     updateMerchantFee: (id, fee) =>

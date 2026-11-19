@@ -35,6 +35,8 @@ import {
 import { InboxScreen } from '@/components/chat/Chat';
 import { AnalyticsScreen, PastOrdersScreen } from '@/components/restaurant/MerchantInsights';
 import { useChat } from '@/context/ChatContext';
+import { CreditsScreen, OutOfCredits, creditCheck, isLow } from '@/components/restaurant/MerchantCredits';
+import { LiveRidersScreen } from '@/components/restaurant/LiveRiders';
 import { pickImage } from '@/utils/pickImage';
 
 const C = Brand.colors;
@@ -63,6 +65,10 @@ function RestaurantScreens() {
       return <AnalyticsScreen />;
     case 'dispatch_policy':
       return <DeliverySettingsScreen />;
+    case 'credits':
+      return <CreditsScreen />;
+    case 'live_riders':
+      return <LiveRidersScreen />;
     default:
       return <NewOrderScreen />;
   }
@@ -205,7 +211,7 @@ function StepProgress({ step }: { step: Step }) {
 }
 
 function NewOrderScreen() {
-  const { publishScannedOrder, scanReceipt, orders, drivers, restaurants, activeRestaurantId, setActiveScreen, algorithm } =
+  const { publishScannedOrder, scanReceipt, orders, drivers, restaurants, activeRestaurantId, setActiveScreen, algorithm, credits } =
     useInThaRoute();
   const restaurant = restaurants.find((r) => r.id === activeRestaurantId) ?? restaurants[0];
   const myDrivers = drivers.filter(
@@ -261,8 +267,13 @@ function NewOrderScreen() {
     setStep('confirm');
   };
 
+  // Out of credits blocks every order, whoever delivers it (the server checks the same).
+  // A platform order also needs enough for its own fee; an own-driver order uses none.
+  const check = creditCheck(credits, dispatch === 'own_driver' ? 0 : template?.estimatedFeeGbp ?? 0);
+  const blockedByCredits = !check.enough;
+
   const post = async () => {
-    if (!template || posting) return;
+    if (!template || posting || blockedByCredits) return;
     setPosting(true);
     const order = await publishScannedOrder({
       template,
@@ -346,6 +357,15 @@ function NewOrderScreen() {
       {step === 'scan' && (
         <>
           <Viewfinder scanning={scanning} />
+
+          {isLow(credits) && (
+            <View style={styles.lowNote}>
+              <Ionicons name="information-circle" size={18} color={C.primary} />
+              <Text style={styles.lowNoteText}>
+                {`${credits!.available.toFixed(2)} credits left. You can still scan, but no orders can be posted, with any driver, until you buy credits.`}
+              </Text>
+            </View>
+          )}
 
           <Button
             label={scanning ? 'Reading receipt…' : 'Scan receipt'}
@@ -524,6 +544,8 @@ function NewOrderScreen() {
             )}
           </Card>
 
+          {blockedByCredits && <OutOfCredits available={check.available} needed={check.needed} />}
+
           <View style={styles.actions}>
             <Button label="Back" variant="secondary" onPress={() => setStep('scan')} style={styles.flex1} />
             <Button
@@ -531,7 +553,9 @@ function NewOrderScreen() {
               icon="send"
               onPress={post}
               loading={posting}
-              disabled={posting || !address.trim() || !postcode.trim() || (dispatch === 'own_driver' && !ownDriverId)}
+              disabled={
+                posting || blockedByCredits || !address.trim() || !postcode.trim() || (dispatch === 'own_driver' && !ownDriverId)
+              }
               style={styles.flex2}
             />
           </View>
@@ -1060,6 +1084,15 @@ function DeliverySettingsScreen() {
 /* ========================================================================== */
 
 const styles = StyleSheet.create({
+  lowNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 12,
+    borderRadius: Brand.radius.md,
+    backgroundColor: C.primarySoft,
+  },
+  lowNoteText: { ...Brand.type.caption, color: C.ink, flex: 1 },
   flex1: { flex: 1 },
   flex2: { flex: 2 },
   flexText: { flex: 1, minWidth: 0, gap: 2 },

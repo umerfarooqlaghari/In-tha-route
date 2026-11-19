@@ -16,6 +16,9 @@ export interface MapPin {
   active?: boolean;
   /** Overrides the pin colour (drop-offs use the order source's colour). */
   color?: string;
+  /** Shown in a bubble when the pin is tapped. */
+  title?: string;
+  description?: string;
 }
 
 interface LiveMapProps {
@@ -26,6 +29,8 @@ interface LiveMapProps {
   bottomInset?: number;
   topInset?: number;
   interactive?: boolean;
+  /** Moves the map to this spot; a new `key` moves it again even to the same place. */
+  focus?: { key: string; coordinate: LatLng } | null;
 }
 
 const PIN_META: Record<MapPinKind, { color: string; icon: keyof typeof Ionicons.glyphMap }> = {
@@ -39,10 +44,16 @@ function Pin({ pin }: { pin: MapPin }) {
   const meta = PIN_META[pin.kind];
   const color = pin.color ?? meta.color;
   if (pin.kind === 'driver') {
+    // A coloured driver (admin: platform or a merchant's own; merchant: free or busy) can carry initials.
+    const tint = pin.color ?? Brand.colors.info;
     return (
-      <View style={styles.driverHalo}>
-        <View style={styles.driverDot}>
-          <Ionicons name="navigate" size={12} color="#FFFFFF" />
+      <View style={[styles.driverHalo, pin.color && { backgroundColor: `${pin.color}2E` }, pin.label && styles.driverHaloLabel]}>
+        <View style={[styles.driverDot, { backgroundColor: tint }, pin.label && styles.driverDotLabel]}>
+          {pin.label ? (
+            <Text style={styles.driverInitials}>{pin.label}</Text>
+          ) : (
+            <Ionicons name="navigate" size={12} color="#FFFFFF" />
+          )}
         </View>
       </View>
     );
@@ -73,6 +84,7 @@ export function LiveMap({
   bottomInset = 0,
   topInset = 0,
   interactive = true,
+  focus,
 }: LiveMapProps) {
   const mapRef = useRef<MapView>(null);
 
@@ -95,6 +107,15 @@ export function LiveMap({
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitKey, bottomInset, topInset]);
+
+  useEffect(() => {
+    if (!focus) return;
+    mapRef.current?.animateToRegion(
+      { ...focus.coordinate, latitudeDelta: 0.012, longitudeDelta: 0.012 },
+      450
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.key]);
 
   return (
     <View style={[styles.container, style]}>
@@ -132,6 +153,8 @@ export function LiveMap({
             key={`${pin.id}:${pin.label ?? ''}:${pin.color ?? ''}:${pin.active ? 1 : 0}`}
             coordinate={pin.coordinate}
             anchor={{ x: 0.5, y: pin.kind === 'driver' ? 0.5 : 1 }}
+            title={pin.title}
+            description={pin.description}
             tracksViewChanges={false}>
             <Pin pin={pin} />
           </Marker>
@@ -185,6 +208,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  driverHaloLabel: { width: 46, height: 46, borderRadius: 23 },
+  driverDotLabel: { width: 32, height: 32, borderRadius: 16 },
+  driverInitials: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   driverDot: {
     width: 24,
     height: 24,

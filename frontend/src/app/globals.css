@@ -85,6 +85,14 @@
   }
 }
 
+/* Grid items may shrink below their content's width, so a long name or number can't
+   push a page wider than a phone screen. In the base layer so min-w-* utilities still win. */
+@layer base {
+  :where(.grid) > * {
+    min-width: 0;
+  }
+}
+
 html {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Svg, { Circle, G } from 'react-native-svg';
 
+import { CreditAdjustSheet, CreditsAdminScreen, FeeSheet, isLowOnCredits } from '@/components/admin/AdminCredits';
 import { LiveMap, MapPin } from '@/components/LiveMap';
 import { ReceiptSheet } from '@/components/ReceiptSheet';
 import {
@@ -26,7 +27,7 @@ import {
 } from '@/components/ui';
 import { Brand, formatGbp, sourceColor } from '@/constants/brand';
 import { coordsForPostcode } from '@/constants/geo';
-import { DriverPolicy, DriverProfile, KycDocument, LiveOrder, useInThaRoute } from '@/context/InThaRouteContext';
+import { DriverPolicy, DriverProfile, KycDocument, LiveOrder, RestaurantPartner, useInThaRoute } from '@/context/InThaRouteContext';
 import { UploadedFile } from '@/components/UploadedFile';
 
 const C = Brand.colors;
@@ -35,6 +36,8 @@ const cleanTitle = (t: string) => t.replace(/\s*\(.*?\)/g, '');
 const shortName = (n: string) => (n ?? '').split(' - ')[0];
 /** Orders not from a delivery app are the merchant's own (direct) orders. */
 const sourceLabel = (source: string) => (source === 'Eat Presto POS' || source === 'Other' ? 'Direct' : source);
+const PLATFORM_DRIVER_COLOR = '#2F6FED';
+const OWN_DRIVER_COLOR = '#7A5AF8';
 const isLive = (o: LiveOrder) => o.status !== 'delivered' && o.status !== 'cancelled';
 const marginOf = (o: LiveOrder) => o.platformMarginGbp ?? o.restaurantFeeGbp - o.driverPayoutGbp;
 const formatCountdown = (seconds: number) =>
@@ -83,6 +86,8 @@ export function AdminView() {
       return <DriversScreen />;
     case 'partner_restaurants':
       return <RestaurantsScreen />;
+    case 'admin_credits':
+      return <CreditsAdminScreen syncBar={<SyncBar />} />;
     default:
       return <OverviewScreen openOrders={openOrders} openDrivers={() => setActiveScreen('driver_kyc')} />;
   }
@@ -211,10 +216,17 @@ function OverviewScreen({
   const toReview = drivers.filter(needsReview).length;
 
   const pins: MapPin[] = [
+    // Every online driver: platform drivers in blue, merchants' own drivers in purple (same as the web).
     ...liveDrivers.map((d) => ({
       id: `drv-${d.id}`,
       kind: 'driver' as const,
+      color: d.driverType === 'restaurant_own' ? OWN_DRIVER_COLOR : PLATFORM_DRIVER_COLOR,
       coordinate: { latitude: d.location!.latitude, longitude: d.location!.longitude },
+      title: d.name,
+      description: [
+        d.driverType === 'restaurant_own' ? `In-house · ${shortName(d.employerRestaurantName ?? 'merchant')}` : 'Platform driver',
+        `${d.activeOrders ?? 0} active order${d.activeOrders === 1 ? '' : 's'}`,
+      ].join(' · '),
     })),
     ...restaurants.map((r) => ({
       id: r.id,
@@ -271,8 +283,16 @@ function OverviewScreen({
             <Text style={styles.muted}>Drop-offs · {active.length}</Text>
           </View>
           <View style={styles.legend}>
-            <View style={[styles.legendDot, { backgroundColor: C.info }]} />
-            <Text style={styles.muted}>Drivers · {liveDrivers.length}</Text>
+            <View style={[styles.legendDot, { backgroundColor: PLATFORM_DRIVER_COLOR }]} />
+            <Text style={styles.muted}>
+              Platform drivers · {liveDrivers.filter((d) => d.driverType !== 'restaurant_own').length}
+            </Text>
+          </View>
+          <View style={styles.legend}>
+            <View style={[styles.legendDot, { backgroundColor: OWN_DRIVER_COLOR }]} />
+            <Text style={styles.muted}>
+              Merchants’ own · {liveDrivers.filter((d) => d.driverType === 'restaurant_own').length}
+            </Text>
           </View>
         </View>
       </Card>
@@ -1482,6 +1502,12 @@ function DocumentPhoto({ doc }: { doc: KycDocument }) {
 /* Restaurants                                                                 */
 /* ========================================================================== */
 
+const POLICY_LABEL: Record<DriverPolicy, string> = {
+  open_platform: 'Platform drivers',
+  hybrid: 'Hybrid',
+  own_drivers: 'Own drivers only',
+};
+
 const POLICY_HELP: Record<DriverPolicy, string> = {
   open_platform: 'Orders go to platform drivers.',
   hybrid: 'Orders go to the merchant’s own drivers and platform drivers.',
@@ -1489,9 +1515,27 @@ const POLICY_HELP: Record<DriverPolicy, string> = {
 };
 
 function RestaurantsScreen() {
-  const { restaurants, updateRestaurantPolicy } = useInThaRoute();
+  const { restaurants, algorithm, setMerchantActive } = useInThaRoute();
   const [query, setQuery] = useState('');
-  const [policy, setPolicy] = useState<DriverPolicy | 'all'>('all');
+  const [policy, setPolicy] = useState<DriverPolicy | 'all' | 'disabled'>('all');
+  const [feeFor, setFeeFor] = useState<RestaurantPartner | null>(null);
+  const [creditsFor, setCreditsFor] = useState<RestaurantPartner | null>(null);
+  const disabledCount = restaurants.filter((r) => r.isActive === false).length;
+
+  const toggleActive = (r: RestaurantPartner) => {
+    if (r.isActive === false) {
+      setMerchantActive(r.id, true);
+      return;
+    }
+    Alert.alert(
+      `Disable ${shortName(r.name)}?`,
+      'They are signed out on the web and in the app straight away and can’t sign in until you enable them again. Their orders, drivers and credits are kept.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Disable', style: 'destructive', onPress: () => setMerchantActive(r.id, false) },
+      ]
+    );
+  };
 
   const counts = {
     open_platform: restaurants.filter((r) => r.driverPolicy === 'open_platform').length,
@@ -1501,8 +1545,9 @@ function RestaurantsScreen() {
   const q = query.trim().toLowerCase();
   const shown = restaurants.filter(
     (r) =>
-      (policy === 'all' || r.driverPolicy === policy) &&
-      (!q || [r.name, r.address, r.postcode, r.phone].join(' ').toLowerCase().includes(q))
+      (policy === 'all' || (policy === 'disabled' ? r.isActive === false : r.driverPolicy === policy)) &&
+      (!q ||
+        [r.name, r.address, r.postcode, r.phone, r.ownerName ?? '', r.ownerEmail ?? ''].join(' ').toLowerCase().includes(q))
   );
 
   return (
@@ -1513,6 +1558,9 @@ function RestaurantsScreen() {
         <Chip label={`Platform · ${counts.open_platform}`} selected={policy === 'open_platform'} onPress={() => setPolicy('open_platform')} />
         <Chip label={`Hybrid · ${counts.hybrid}`} selected={policy === 'hybrid'} onPress={() => setPolicy('hybrid')} />
         <Chip label={`Own · ${counts.own_drivers}`} selected={policy === 'own_drivers'} onPress={() => setPolicy('own_drivers')} />
+        {disabledCount > 0 && (
+          <Chip label={`Disabled · ${disabledCount}`} selected={policy === 'disabled'} onPress={() => setPolicy('disabled')} />
+        )}
       </ChipRow>
 
       {shown.length === 0 && (
@@ -1522,12 +1570,21 @@ function RestaurantsScreen() {
       )}
 
       {shown.map((r) => (
-        <Card key={r.id}>
+        <Card key={r.id} style={r.isActive === false ? styles.cardDisabled : undefined}>
           <ListRow
             left={<IconTile icon="storefront-outline" tone="primary" />}
             title={shortName(r.name)}
             subtitle={`${r.address} · ${r.postcode}`}
+            right={r.isActive === false ? <Badge label="Disabled" tone="primary" icon="ban-outline" /> : undefined}
           />
+          {!!(r.ownerName || r.ownerEmail) && (
+            <View style={[styles.legend, styles.indent]}>
+              <Ionicons name="person-outline" size={14} color={C.ink3} />
+              <Text style={styles.muted} numberOfLines={1}>
+                {[r.ownerName, r.ownerEmail].filter(Boolean).join(' · ')}
+              </Text>
+            </View>
+          )}
           {!!r.phone && (
             <View style={[styles.legend, styles.indent]}>
               <Ionicons name="call-outline" size={14} color={C.ink3} />
@@ -1550,16 +1607,12 @@ function RestaurantsScreen() {
               <Text style={styles.muted}>Delivered today</Text>
             </View>
           </View>
+          {/* Who delivers is the merchant's own choice (their Delivery settings); admins only see it. */}
           <Text style={styles.detailTitle}>WHO DELIVERS</Text>
-          <Segmented<DriverPolicy>
-            value={r.driverPolicy}
-            onChange={(p) => updateRestaurantPolicy(r.id, p)}
-            options={[
-              { value: 'open_platform', label: 'Platform' },
-              { value: 'hybrid', label: 'Hybrid' },
-              { value: 'own_drivers', label: 'Own' },
-            ]}
-          />
+          <View style={styles.legend}>
+            <Badge label={POLICY_LABEL[r.driverPolicy]} tone="info" />
+            <Text style={styles.muted}>Set by the merchant</Text>
+          </View>
           <Hint>{POLICY_HELP[r.driverPolicy]}</Hint>
           {!!r.pickupSafetyNote && (
             <View style={styles.pickupNote}>
@@ -1569,8 +1622,50 @@ function RestaurantsScreen() {
               </Text>
             </View>
           )}
+          <View style={styles.merchantStats}>
+            <Pressable
+              onPress={() => setFeeFor(r)}
+              accessibilityRole="button"
+              accessibilityLabel={`Change ${shortName(r.name)}’s delivery fee`}
+              style={({ pressed }) => [styles.editTile, pressed && styles.pressed]}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.detailTitle}>FEE</Text>
+                <Ionicons name="pencil" size={13} color={C.ink3} />
+              </View>
+              <Text style={styles.fleetValue}>{formatGbp(r.feePerDeliveryGbp ?? algorithm.baseRestaurantChargeGbp)}</Text>
+              <Text style={[styles.mutedStrong, r.customFeeGbp != null && { color: C.info }]}>
+                {r.customFeeGbp != null ? 'Custom rate' : 'Standard'}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setCreditsFor(r)}
+              accessibilityRole="button"
+              accessibilityLabel={`Adjust ${shortName(r.name)}’s credits`}
+              style={({ pressed }) => [styles.editTile, pressed && styles.pressed]}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.detailTitle}>CREDITS</Text>
+                <Ionicons name="pencil" size={13} color={C.ink3} />
+              </View>
+              <Text style={[styles.fleetValue, isLowOnCredits(r) && { color: C.primary }]}>
+                {(r.credits?.available ?? 0).toFixed(2)}
+              </Text>
+              <Text style={styles.muted} numberOfLines={1}>
+                {`${r.credits?.deliveriesLeft == null ? '—' : `≈ ${r.credits.deliveriesLeft} left`} · ${(r.credits?.usedCredits ?? 0).toFixed(0)} used`}
+              </Text>
+            </Pressable>
+          </View>
+          <Button
+            label={r.isActive === false ? 'Enable merchant' : 'Disable merchant'}
+            icon="power"
+            variant={r.isActive === false ? 'success' : 'secondary'}
+            compact
+            onPress={() => toggleActive(r)}
+          />
         </Card>
       ))}
+
+      <FeeSheet merchant={feeFor} onClose={() => setFeeFor(null)} />
+      <CreditAdjustSheet merchant={creditsFor} onClose={() => setCreditsFor(null)} />
     </Screen>
   );
 }
@@ -1766,6 +1861,8 @@ const styles = StyleSheet.create({
   inlineStats: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 14, paddingLeft: 2 },
   merchantStats: { flexDirection: 'row', gap: 10 },
   merchantStat: { flex: 1, gap: 2, padding: 12, borderRadius: Brand.radius.md, backgroundColor: C.surfaceAlt },
+  editTile: { flex: 1, gap: 2, padding: 12, borderRadius: Brand.radius.md, borderWidth: 1, borderColor: C.line },
+  cardDisabled: { opacity: 0.7 },
   pickupNote: { padding: 10, borderRadius: 10, backgroundColor: C.warningSoft },
   pickupNoteLabel: { ...Brand.type.captionStrong, color: C.warning },
 });
