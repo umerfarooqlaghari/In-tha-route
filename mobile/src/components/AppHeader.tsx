@@ -22,8 +22,11 @@ const C = Brand.colors;
 
 export function AppHeader() {
   const insets = useSafeAreaInsets();
-  const { role, activeScreen, user } = useInThaRoute();
+  const { role, activeScreen, user, orders } = useInThaRoute();
   const { unreadTotal } = useChat();
+  // Admin: a dot on the menu while a live order needs attention.
+  const adminAlert =
+    role === 'admin' && orders.some((o) => !!o.attention && o.status !== 'delivered' && o.status !== 'cancelled');
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const screen = ROLE_SCREENS[role].find((s) => s.key === activeScreen) ?? ROLE_SCREENS[role][0];
@@ -36,7 +39,7 @@ export function AppHeader() {
         <View style={[styles.header, { paddingTop: topPad }]}>
           <View>
             <IconButton icon="menu" label="Open menu" testID="open-menu" onPress={() => setDrawerOpen(true)} />
-            {unreadTotal > 0 && <View style={styles.menuDot} pointerEvents="none" />}
+            {(unreadTotal > 0 || adminAlert) && <View style={styles.menuDot} pointerEvents="none" />}
           </View>
           <View style={styles.titleWrap}>
             <Text style={styles.title} numberOfLines={1}>
@@ -59,8 +62,26 @@ export function AppHeader() {
   const insets = useSafeAreaInsets();
       const {width} = useWindowDimensions();
       const drawerWidth = Math.min(320, width * 0.84);
-      const {role, activeScreen, setActiveScreen, logout, user, screens} = useInThaRoute();
+      const {role, activeScreen, setActiveScreen, logout, user, screens, orders, drivers} = useInThaRoute();
       const {unreadTotal} = useChat();
+      // Admin: live orders (red when any need attention) and drivers waiting for a document check.
+      const adminLive = role === 'admin' ? orders.filter((o) => o.status !== 'delivered' && o.status !== 'cancelled') : [];
+      const adminAttention = adminLive.some((o) => !!o.attention);
+      const toReview =
+        role === 'admin'
+          ? drivers.filter(
+              (d) =>
+                d.driverType === 'platform_contracted' &&
+                (d.approval === 'pending' ||
+                  (d.approval === 'approved' && d.kycDocuments.some((k) => k.status === 'pending')))
+            ).length
+          : 0;
+      const badgeFor = (key: string): { count: number; muted?: boolean } | null => {
+        if (key === 'messages' && unreadTotal > 0) return { count: unreadTotal };
+        if (key === 'admin_orders' && adminLive.length > 0) return { count: adminLive.length, muted: !adminAttention };
+        if (key === 'driver_kyc' && toReview > 0) return { count: toReview };
+        return null;
+      };
       const persona = PERSONAS[role];
       const profileName = user?.fullName ?? persona.name;
       const profileOrg = user ? user.restaurant?.name ?? persona.label : persona.org;
@@ -158,11 +179,17 @@ export function AppHeader() {
                       {s.subtitle}
                     </Text>
                   </View>
-                  {s.key === 'messages' && unreadTotal > 0 && (
-                    <View style={styles.navBadge}>
-                      <Text style={styles.navBadgeText}>{unreadTotal > 99 ? '99+' : unreadTotal}</Text>
-                    </View>
-                  )}
+                  {(() => {
+                    const badge = badgeFor(s.key);
+                    if (!badge) return null;
+                    return (
+                      <View style={[styles.navBadge, badge.muted && styles.navBadgeMuted]}>
+                        <Text style={[styles.navBadgeText, badge.muted && styles.navBadgeTextMuted]}>
+                          {badge.count > 99 ? '99+' : badge.count}
+                        </Text>
+                      </View>
+                    );
+                  })()}
                 </Pressable>
               );
             })}
@@ -270,4 +297,6 @@ export function AppHeader() {
         justifyContent: 'center',
       },
       navBadgeText: {color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+      navBadgeMuted: { backgroundColor: C.surfaceAlt },
+      navBadgeTextMuted: { color: C.ink2 },
 });

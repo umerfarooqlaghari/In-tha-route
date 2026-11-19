@@ -290,6 +290,7 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
   ],
   admin: [
     { key: 'live_ledger', title: 'Overview', subtitle: 'Live map & revenue', icon: 'map-outline' },
+    { key: 'admin_orders', title: 'Live orders', subtitle: 'Search, filter & manage', icon: 'receipt-outline' },
     { key: 'pricing_algorithm', title: 'Pricing', subtitle: 'Fees & batch payouts', icon: 'calculator-outline' },
     { key: 'driver_kyc', title: 'Drivers', subtitle: 'Approve & contract', icon: 'shield-checkmark-outline' },
     { key: 'partner_restaurants', title: 'Merchants', subtitle: 'Partners & policies', icon: 'storefront-outline' },
@@ -310,6 +311,8 @@ const DEFAULT_ALGORITHM: AlgorithmConfig = {
 };
 
 const POLL_MS = 12_000;
+/** The admin panel matches the web panel, which re-reads every 10 seconds. */
+const ADMIN_POLL_MS = 10_000;
 
 /** A message the user can act on, preferring the first field error. */
 export function errorMessage(err: unknown): string {
@@ -352,6 +355,8 @@ interface InThaRouteContextType {
   isDashboardReady: boolean;
   dashboardError: string | null;
   refreshDashboard: () => Promise<void>;
+  /** When the dashboard last arrived from the server (ms since epoch, 0 before the first). */
+  dashboardSyncedAt: number;
 
   orders: LiveOrder[];
   drivers: DriverProfile[];
@@ -570,11 +575,12 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     if (!isLoggedIn) return;
     refreshDashboard();
-    let timer: ReturnType<typeof setInterval> | null = setInterval(refreshDashboard, POLL_MS);
+    const every = role === 'admin' ? ADMIN_POLL_MS : POLL_MS;
+    let timer: ReturnType<typeof setInterval> | null = setInterval(refreshDashboard, every);
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         refreshDashboard();
-        if (!timer) timer = setInterval(refreshDashboard, POLL_MS);
+        if (!timer) timer = setInterval(refreshDashboard, every);
       } else if (timer) {
         clearInterval(timer);
         timer = null;
@@ -849,6 +855,7 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         isDashboardReady: !!data && data.role === role,
         dashboardError,
         refreshDashboard,
+        dashboardSyncedAt: dash.receivedAt,
         orders,
         drivers: data?.drivers ?? [],
         restaurants: data?.restaurants ?? [],
