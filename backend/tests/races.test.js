@@ -280,20 +280,14 @@ describe('pool add and going offline', () => {
 });
 
 describe('duplicate orders', () => {
-  // Duplicate receipts are allowed for now (see order.service.js); un-skip these when the check is back on.
-  test('the same receipt can be posted again while the check is off', async () => {
-    assert.equal((await post('#DUP0')).status, 201);
-    assert.equal((await post('#DUP0')).status, 201);
-  });
-
-  const post = (ref, source = 'Deliveroo') =>
+  const post = (ref, source = 'Deliveroo', extra = {}) =>
     request(app).post('/api/restaurant/orders').set(bearer(restaurant)).send({
       source, externalOrderId: ref, customerName: 'Anna T.', customerPhone: '+442033195035',
       deliveryAddress: '19 Rosemont Rd, Richmond', postcode: 'TW10 6QN', prepMinutes: 20,
-      dispatchType: 'open_platform', items: [],
+      dispatchType: 'open_platform', items: [], ...extra,
     });
 
-  test.skip('the same receipt posted twice at once goes through only once', async () => {
+  test('the same receipt posted twice at once goes through only once', async () => {
     const results = await Promise.all([post('#DUP1'), post('#DUP1'), post('#DUP1')]);
     assert.deepEqual(results.map((r) => r.status).sort(), [201, 409, 409]);
     const dup = results.find((r) => r.status === 409);
@@ -301,7 +295,7 @@ describe('duplicate orders', () => {
     assert.equal(dup.body.error.message, 'This order is already live.');
   });
 
-  test.skip('a receipt whose order was delivered says so', async () => {
+  test('a receipt whose order was delivered says so', async () => {
     assert.equal((await post('#DUP2')).status, 201);
     await pool.query(`UPDATE orders SET status = 'delivered', delivered_at = now() WHERE external_order_id = '#DUP2'`);
     const again = await post('#DUP2');
@@ -309,11 +303,20 @@ describe('duplicate orders', () => {
     assert.equal(again.body.error.message, 'This order has already been delivered.');
   });
 
-  test.skip('the same number from another app, or after cancelling, is allowed', async () => {
+  test('the same number from another app, or after cancelling, is allowed', async () => {
     assert.equal((await post('#DUP1', 'Uber Eats')).status, 201);
     const { rows } = await pool.query(`SELECT id FROM orders WHERE external_order_id = '#DUP1' AND source = 'Deliveroo'`);
     await request(app).post(`/api/restaurant/orders/${rows[0].id}/cancel`).set(bearer(restaurant)).send({});
     assert.equal((await post('#DUP1')).status, 201);
+  });
+
+  test('the merchant can choose to post the same receipt again', async () => {
+    assert.equal((await post('#DUP3')).status, 201);
+    assert.equal((await post('#DUP3')).status, 409);
+    const again = await post('#DUP3', 'Deliveroo', { repeat: true });
+    assert.equal(again.status, 201, JSON.stringify(again.body));
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM orders WHERE external_order_id = '#DUP3'`);
+    assert.equal(rows[0].n, 2);
   });
 });
 

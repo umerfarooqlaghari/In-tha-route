@@ -129,6 +129,13 @@ async function orderReceipt(req, res) {
   res.send(file.data);
 }
 
+/** Admin sets (or clears) the date a driver's document runs out. */
+async function updateDocumentExpiry(req, res) {
+  const { expiresOn } = parse(v.documentExpirySchema, req.body);
+  await kyc.setExpiry(parse(v.uuidSchema, req.params.id), expiresOn);
+  res.json({ dashboard: await buildDashboard() });
+}
+
 /** The photo a driver uploaded for one document. */
 async function documentFile(req, res) {
   const file = await kyc.getDocumentFile(parse(v.uuidSchema, req.params.id));
@@ -150,5 +157,6 @@ module.exports = {
   cancelOrder,
   releaseOrder,
   orderReceipt,
+  updateDocumentExpiry,
   documentFile,
 };

@@ -52,6 +52,8 @@ const createOrderSchema = z
     ownDriverId: z.uuid('Choose one of your drivers.').optional(),
     // The photo saved by the scan this order came from.
     receiptFileId: z.uuid().optional().catch(undefined),
+    // The merchant was told this receipt is already posted and chose to post it again.
+    repeat: z.boolean().optional().default(false),
   })
   .refine((o) => o.dispatchType !== 'own_driver' || o.ownDriverId, {
     path: ['ownDriverId'],
@@ -133,6 +135,14 @@ const customFeeSchema = z.object({
   // null: back to the standard fee for every merchant.
   customFeeGbp: z.union([z.null(), z.coerce.number().min(0, 'The fee cannot be negative.').max(100, 'The fee is too high.')]),
 });
+// YYYY-MM-DD, a real date; null clears it.
+const documentExpirySchema = z.object({
+  expiresOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2027-03-31.')
+    .refine((d) => !Number.isNaN(Date.parse(d)) && new Date(d).toISOString().slice(0, 10) === d, 'That date doesn’t exist.')
+    .nullable(),
+});
 const merchantStatusSchema = z.object({ active: z.boolean({ error: 'active must be true or false.' }) });
 const creditsListSchema = z.object({
   kind: z.enum(['purchase', 'grant', 'adjustment', 'delivery']).optional(),
@@ -158,5 +168,6 @@ module.exports = {
   adjustCreditsSchema,
   customFeeSchema,
   merchantStatusSchema,
+  documentExpirySchema,
   creditsListSchema,
 };

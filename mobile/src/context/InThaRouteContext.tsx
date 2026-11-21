@@ -145,6 +145,12 @@ export interface KycDocument {
   hasFile?: boolean;
   /** What was uploaded: a photo, a PDF or a .docx file. */
   fileType?: 'image' | 'pdf' | 'word';
+  /** Licence, insurance, ID and right to work run out; NI and bank details don't. */
+  canExpire?: boolean;
+  /** YYYY-MM-DD, set by an admin; null when not recorded. */
+  expiresOn?: string | null;
+  /** 'expiring' means within 30 days. */
+  expiryState?: 'valid' | 'expiring' | 'expired' | null;
 }
 
 export interface DriverProfile {
@@ -480,6 +486,8 @@ interface InThaRouteContextType {
   pricingSummary: PricingSummary | null;
   totals: AdminTotals | null;
   approveDriverKyc: (driverId: string) => Promise<boolean>;
+  /** Admin: when a driver's document runs out (YYYY-MM-DD); null clears it. */
+  setDocumentExpiry: (documentId: string, expiresOn: string | null) => Promise<boolean>;
   rejectDriverKyc: (driverId: string, reason?: string) => Promise<boolean>;
   updateAlgorithmConfig: (partial: Partial<AlgorithmConfig>) => Promise<boolean>;
   updateSteppedPayoutAt: (orderPositionIndex: number, amountGbp: number) => Promise<boolean>;
@@ -797,31 +805,47 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
     customAccessCode,
     customNote,
   }) => {
-    try {
-      const res = await call<{ order: LiveOrder; dashboard: Dashboard }>('POST', '/api/restaurant/orders', {
-        source: template.source,
-        externalOrderId: template.externalOrderId,
-        customerName: template.customerName,
-        customerPhone: template.customerPhone,
-        phoneAccessCode: customAccessCode ?? template.phoneAccessCode ?? '',
-        directCustomerPhone: template.directCustomerPhone ?? '',
-        deliveryAddress: customAddress || template.deliveryAddress,
-        postcode: customPostcode || template.postcode,
-        deliveryInstructions: (customNote ?? template.deliveryInstructions ?? '').trim(),
-        orderTotalGbp: template.orderTotalGbp,
-        items: template.items.filter((i) => i.name && i.quantity > 0),
-        prepMinutes,
-        dispatchType,
-        ...(dispatchType === 'own_driver' && { ownDriverId }),
-        ...(template.receiptFileId && { receiptFileId: template.receiptFileId }),
-      });
-      return res.order;
-    } catch (err) {
-      // The same receipt again: the message says it all ("This order is already live.").
-      if (err instanceof ApiError && err.code === 'DUPLICATE_ORDER') Alert.alert(err.message);
-      else showError(err, 'Couldn’t post the order');
-      return null;
-    }
+    const send = async (repeat: boolean): Promise<LiveOrder | null> => {
+      try {
+        const res = await call<{ order: LiveOrder; dashboard: Dashboard }>('POST', '/api/restaurant/orders', {
+          source: template.source,
+          externalOrderId: template.externalOrderId,
+          customerName: template.customerName,
+          customerPhone: template.customerPhone,
+          phoneAccessCode: customAccessCode ?? template.phoneAccessCode ?? '',
+          directCustomerPhone: template.directCustomerPhone ?? '',
+          deliveryAddress: customAddress || template.deliveryAddress,
+          postcode: customPostcode || template.postcode,
+          deliveryInstructions: (customNote ?? template.deliveryInstructions ?? '').trim(),
+          orderTotalGbp: template.orderTotalGbp,
+          items: template.items.filter((i) => i.name && i.quantity > 0),
+          prepMinutes,
+          dispatchType,
+          ...(dispatchType === 'own_driver' && { ownDriverId }),
+          ...(template.receiptFileId && { receiptFileId: template.receiptFileId }),
+          ...(repeat && { repeat: true }),
+        });
+        return res.order;
+      } catch (err) {
+        // The same receipt again ("This order is already live."): the merchant can post it once more on purpose.
+        if (!repeat && err instanceof ApiError && err.code === 'DUPLICATE_ORDER') {
+          return new Promise<LiveOrder | null>((resolve) =>
+            Alert.alert(
+              err.message,
+              'Would you like to post it again as a new order?',
+              [
+                { text: 'No', style: 'cancel', onPress: () => resolve(null) },
+                { text: 'Post again', onPress: () => resolve(send(true)) },
+              ],
+              { cancelable: true, onDismiss: () => resolve(null) }
+            )
+          );
+        }
+        showError(err, 'Couldn’t post the order');
+        return null;
+      }
+    };
+    return send(false);
   };
 
   const findDriversAgain = (orderId: string) =>
@@ -885,6 +909,9 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
   // Admin
   const approveDriverKyc = (driverId: string) =>
     attempt(() => call('POST', `/api/admin/drivers/${driverId}/approve`));
+
+  const setDocumentExpiry = (documentId: string, expiresOn: string | null) =>
+    attempt(() => call('PATCH', `/api/admin/kyc-documents/${documentId}/expiry`, { expiresOn }));
 
   const rejectDriverKyc = (driverId: string, reason?: string) =>
     attempt(() => call('POST', `/api/admin/drivers/${driverId}/reject`, reason ? { reason } : {}));
@@ -967,6 +994,7 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         pricingSummary: data?.pricingSummary ?? null,
         totals: data?.totals ?? null,
         approveDriverKyc,
+        setDocumentExpiry,
         rejectDriverKyc,
         updateAlgorithmConfig,
         updateSteppedPayoutAt,

@@ -5,19 +5,56 @@ const files = require('./file.service');
 
 // Order matters: the app shows the documents (and their icons) in this order.
 const DOC_TYPES = [
-  { type: 'driving_licence', title: 'UK Driving Licence (Photocard)', subtitle: 'Full UK licence or CBT certificate' },
+  {
+    type: 'driving_licence',
+    title: 'UK Driving Licence (Photocard)',
+    subtitle: 'Full UK licence or CBT certificate',
+    canExpire: true,
+  },
   { type: 'ni_number', title: 'National Insurance (NI) Number', subtitle: 'Proof of your National Insurance number' },
   { type: 'bank_account', title: 'UK Bank Account & Sort Code', subtitle: 'Bank statement or card for weekly payouts' },
-  { type: 'vehicle_insurance', title: 'Hire & Reward Vehicle Insurance', subtitle: 'Food delivery insurance certificate' },
-  { type: 'identity', title: 'Personal Identity Document', subtitle: 'Passport or other government photo ID' },
+  {
+    type: 'vehicle_insurance',
+    title: 'Hire & Reward Vehicle Insurance',
+    subtitle: 'Food delivery insurance certificate',
+    canExpire: true,
+  },
+  {
+    type: 'identity',
+    title: 'Personal Identity Document',
+    subtitle: 'Passport or other government photo ID',
+    canExpire: true,
+  },
   {
     type: 'right_to_work',
     title: 'Right to Work in the UK',
     subtitle: 'UK or Irish passport, or a screenshot of your Home Office share code',
+    canExpire: true,
   },
 ];
 const ORDER = new Map(DOC_TYPES.map((d, i) => [d.type, i]));
 const META = new Map(DOC_TYPES.map((d) => [d.type, d]));
+// "Expires soon" this many days ahead.
+const EXPIRY_WARNING_DAYS = 30;
+
+/** Today's date in the UK as YYYY-MM-DD. */
+const ukToday = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+
+/** A date column as YYYY-MM-DD (pg returns it as a string or a Date). */
+function isoDate(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value.slice(0, 10);
+  const d = new Date(value);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** 'expired', 'expiring' (within 30 days) or 'valid'; null when no date is set. */
+function expiryState(expiresOn, today = ukToday()) {
+  if (!expiresOn) return null;
+  if (expiresOn < today) return 'expired';
+  const days = Math.round((Date.parse(expiresOn) - Date.parse(today)) / 86400000);
+  return days <= EXPIRY_WARNING_DAYS ? 'expiring' : 'valid';
+}
 
 async function createSlots(driverId, client = db) {
   await client.query(
@@ -57,6 +94,10 @@ function toDocument(row) {
     hasFile: Boolean(row.file_id),
     // 'image', 'pdf' or 'word', so the apps know how to show it.
     fileType: row.file_id ? files.fileKind(row.file_mime) : undefined,
+    // Licence, insurance, ID and right to work run out; the admin records when.
+    canExpire: Boolean(meta.canExpire),
+    expiresOn: isoDate(row.expires_on),
+    expiryState: expiryState(isoDate(row.expires_on)),
   };
 }
 
@@ -89,7 +130,8 @@ async function upload({ driverId, userId, documentId, imageBase64, mimeType }) {
 
       newFileId = await files.saveImage({ imageBase64, mimeType, ownerUserId: userId, allowDocuments: true }, client);
       await client.query(
-        `UPDATE kyc_documents SET status = 'pending', file_id = $1, note = NULL, reviewed_by = NULL, updated_at = now()
+        `UPDATE kyc_documents SET status = 'pending', file_id = $1, note = NULL, reviewed_by = NULL, expires_on = NULL,
+               updated_at = now()
           WHERE id = $2`,
         [newFileId, doc.id]
       );
@@ -162,7 +204,8 @@ async function reject(driverId, adminUserId, reason) {
       [driverId]
     );
     await client.query(
-      `UPDATE kyc_documents SET status = 'missing', note = $2, reviewed_by = $3, file_id = NULL, updated_at = now()
+      `UPDATE kyc_documents SET status = 'missing', note = $2, reviewed_by = $3, file_id = NULL, expires_on = NULL,
+             updated_at = now()
         WHERE driver_id = $1`,
       [driverId, note, adminUserId]
     );
@@ -176,6 +219,20 @@ async function reject(driverId, adminUserId, reason) {
   for (const id of oldFileIds) await files.deleteFile(id);
 }
 
+/** Admin records when a document runs out (null clears it). Only for documents that expire. */
+async function setExpiry(documentId, expiresOn) {
+  const { rows } = await db.query('SELECT doc_type, file_id FROM kyc_documents WHERE id = $1', [documentId]);
+  const doc = rows[0];
+  if (!doc) throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'Document not found.');
+  if (!META.get(doc.doc_type)?.canExpire) {
+    throw new AppError(400, 'DOCUMENT_DOES_NOT_EXPIRE', 'This document has no expiry date.');
+  }
+  if (!doc.file_id && expiresOn) {
+    throw new AppError(400, 'DOCUMENT_NOT_UPLOADED', 'The driver hasn’t uploaded this document yet.');
+  }
+  await db.query('UPDATE kyc_documents SET expires_on = $2 WHERE id = $1', [documentId, expiresOn]);
+}
+
 /** The stored photo, PDF or Word file for a document (admin review, or the driver's own). */
 async function getDocumentFile(documentId, { driverId } = {}) {
   const { rows } = await db.query(
@@ -186,4 +243,14 @@ async function getDocumentFile(documentId, { driverId } = {}) {
   return files.getFile(rows[0].file_id);
 }
 
-module.exports = { DOC_TYPES, createSlots, listForDrivers, upload, approve, reject, getDocumentFile };
+module.exports = {
+  DOC_TYPES,
+  createSlots,
+  listForDrivers,
+  upload,
+  approve,
+  reject,
+  setExpiry,
+  getDocumentFile,
+  expiryState,
+};

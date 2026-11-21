@@ -23,5 +23,6 @@ router.post('/orders/:id/cancel', h(c.cancelOrder)); // any order not delivered 
 router.post('/orders/:id/release', h(c.releaseOrder)); // take off the driver, back to the pool
 router.get('/orders/:id/receipt', h(c.orderReceipt)); // the scanned receipt photo
 router.get('/kyc-documents/:id/file', h(c.documentFile)); // uploaded photo
+router.patch('/kyc-documents/:id/expiry', h(c.updateDocumentExpiry)); // when the document runs out
 
 module.exports = router;

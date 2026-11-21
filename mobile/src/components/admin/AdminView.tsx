@@ -1166,7 +1166,9 @@ function DriversScreen() {
   const [reason, setReason] = useState('');
   // The uploaded photos of one driver, stepped through one at a time.
   const [viewer, setViewer] = useState<{ docs: KycDocument[]; index: number } | null>(null);
-  const photoDoc = viewer ? viewer.docs[viewer.index] : null;
+  const viewed = viewer ? viewer.docs[viewer.index] : null;
+  // The latest copy, so a saved expiry date shows straight away.
+  const photoDoc = viewed && (drivers.flatMap((d) => d.kycDocuments).find((k) => k.id === viewed.id) ?? viewed);
   const openPhoto = (d: DriverProfile, doc: KycDocument) => {
     const docs = d.kycDocuments.filter((k) => k.hasFile);
     setViewer({ docs, index: Math.max(0, docs.findIndex((k) => k.id === doc.id)) });
@@ -1325,9 +1327,12 @@ function DriversScreen() {
                           doc.status === 'verified' ? C.success : doc.status === 'missing' ? C.primary : C.warning
                         }
                       />
-                      <Text style={styles.docTitle} numberOfLines={1}>
-                        {cleanTitle(doc.title)}
-                      </Text>
+                      <View style={styles.flexText}>
+                        <Text style={styles.docTitle} numberOfLines={1}>
+                          {cleanTitle(doc.title)}
+                        </Text>
+                        {doc.canExpire && doc.hasFile && <ExpiryCaption doc={doc} />}
+                      </View>
                       {doc.hasFile ? (
                         <Text style={styles.docView}>View</Text>
                       ) : (
@@ -1419,6 +1424,7 @@ function DriversScreen() {
           <>
             <Text style={styles.muted}>Should show: {photoDoc.subtitle}</Text>
             <DocumentPhoto key={photoDoc.id} doc={photoDoc} />
+            {photoDoc.canExpire && <ExpiryEditor key={`${photoDoc.id}-${photoDoc.expiresOn ?? ''}`} doc={photoDoc} />}
             {viewer.docs.length > 1 && (
               <View style={styles.actionRow}>
                 <Button
@@ -1489,6 +1495,103 @@ function DriverMeta({ driver: d }: { driver: DriverProfile }) {
 }
 
 /** The photo, PDF or .docx file a driver uploaded, fetched with the admin's sign-in. */
+const expiryDate = (iso: string) =>
+  new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+const daysUntil = (iso: string) => {
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  return Math.round((new Date(`${iso}T12:00:00`).getTime() - today.getTime()) / 86_400_000);
+};
+
+/** "Expires 31 Mar 2027", "Expires in 12 days" or "Expired 3 Mar 2026" under a document's name. */
+function ExpiryCaption({ doc }: { doc: KycDocument }) {
+  if (!doc.expiresOn) return <Text style={styles.muted}>Expiry date not set</Text>;
+  const days = daysUntil(doc.expiresOn);
+  if (doc.expiryState === 'expired') {
+    return <Text style={[styles.mutedStrong, { color: C.primary }]}>{`Expired ${expiryDate(doc.expiresOn)}`}</Text>;
+  }
+  if (doc.expiryState === 'expiring') {
+    return (
+      <Text style={[styles.mutedStrong, { color: C.warning }]}>
+        {days === 0 ? 'Expires today' : `Expires in ${days} day${days === 1 ? '' : 's'}`}
+      </Text>
+    );
+  }
+  return <Text style={styles.muted}>{`Expires ${expiryDate(doc.expiresOn)}`}</Text>;
+}
+
+/** DD/MM/YYYY as typed -> YYYY-MM-DD, or null when it isn't a real date. */
+function parseUkDate(text: string): string | null {
+  const m = text.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const iso = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  const d = new Date(`${iso}T12:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
+const toUkDate = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+
+/** Adds the slashes while typing: 31032027 -> 31/03/2027. */
+const maskUkDate = (text: string) => {
+  const digits = text.replace(/\D/g, '').slice(0, 8);
+  return [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean).join('/');
+};
+
+/** The admin types the date a document runs out while looking at it. */
+function ExpiryEditor({ doc }: { doc: KycDocument }) {
+  const { setDocumentExpiry } = useInThaRoute();
+  const [text, setText] = useState(doc.expiresOn ? toUkDate(doc.expiresOn) : '');
+  const [busy, setBusy] = useState<'save' | 'clear' | null>(null);
+  const parsed = parseUkDate(text);
+  const typedFull = text.replace(/\D/g, '').length === 8;
+  const unchanged = parsed === (doc.expiresOn ?? null);
+
+  const save = async (value: string | null) => {
+    setBusy(value ? 'save' : 'clear');
+    await setDocumentExpiry(doc.id, value);
+    setBusy(null);
+  };
+
+  return (
+    <Card style={styles.expiryCard}>
+      <View style={styles.rowBetween}>
+        <Text style={styles.detailTitle}>EXPIRY DATE</Text>
+        <ExpiryCaption doc={doc} />
+      </View>
+      <Field
+        label="Expires on (DD/MM/YYYY)"
+        value={text}
+        onChangeText={(t) => setText(maskUkDate(t))}
+        placeholder="31/03/2027"
+        keyboardType="number-pad"
+        maxLength={10}
+        error={typedFull && !parsed ? 'That date doesn’t exist.' : undefined}
+      />
+      <View style={styles.actionRow}>
+        {doc.expiresOn ? (
+          <Button
+            label="Clear"
+            variant="secondary"
+            loading={busy === 'clear'}
+            disabled={!!busy}
+            onPress={() => save(null)}
+            style={styles.flex1}
+          />
+        ) : null}
+        <Button
+          label="Save date"
+          icon="calendar"
+          loading={busy === 'save'}
+          disabled={!!busy || !parsed || unchanged}
+          onPress={() => parsed && save(parsed)}
+          style={styles.flex2}
+        />
+      </View>
+    </Card>
+  );
+}
+
 function DocumentPhoto({ doc }: { doc: KycDocument }) {
   return (
     <View style={styles.gap10}>
@@ -1843,6 +1946,7 @@ const styles = StyleSheet.create({
   progressTrack: { height: 4, borderRadius: 2, backgroundColor: C.line, overflow: 'hidden' },
   progressFill: { height: 4, borderRadius: 2 },
   docRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 2 },
+  expiryCard: { gap: 12 },
   docTitle: { ...Brand.type.caption, color: C.ink, flex: 1 },
   docView: { ...Brand.type.captionStrong, color: C.primary },
   viewerCount: { ...Brand.type.captionStrong, color: C.ink2, alignSelf: 'center' },

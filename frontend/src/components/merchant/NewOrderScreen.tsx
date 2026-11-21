@@ -10,6 +10,7 @@ import {
   ImageUp,
   Info,
   ReceiptText,
+  Repeat2,
   ScanLine,
   Send,
   UserRound,
@@ -109,7 +110,7 @@ export function NewOrderScreen() {
   const check = creditCheck(credits, Math.max(dispatch === "own_driver" ? 0 : fee, credits?.feePerDeliveryGbp ?? 0));
   const blockedByCredits = !check.enough;
 
-  const post = async () => {
+  const post = async (repeat = false) => {
     if (!template || posting || blockedByCredits) return;
     setPosting(true);
     setPostError(null);
@@ -123,6 +124,7 @@ export function NewOrderScreen() {
         postcode: postcode.trim(),
         accessCode: accessCode.trim(),
         note: note.trim(),
+        repeat,
       });
       setPublished(order);
       setStep("done");
@@ -394,6 +396,27 @@ export function NewOrderScreen() {
           {postError && !(blockedByCredits && postError.code === "OUT_OF_CREDITS") && (
             postError.code === "OUT_OF_CREDITS" ? (
               <OutOfCredits available={check.available} needed={check.needed} />
+            ) : postError.code === "DUPLICATE_ORDER" ? (
+              // The same receipt again: say so, and let the merchant post it once more on purpose.
+              <div className="rounded-2xl border border-brand-line bg-brand-soft p-4" role="alert">
+                <div className="flex items-start gap-3">
+                  <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand text-white">
+                    <Repeat2 className="size-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold text-ink">{postError.message}</p>
+                    <p className="mt-0.5 text-sm text-ink-2">Would you like to post it again as a new order?</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex gap-2.5">
+                  <Button variant="secondary" className="flex-1" onClick={() => setPostError(null)} disabled={posting}>
+                    No, keep one
+                  </Button>
+                  <Button className="flex-1" icon={<Repeat2 className="size-4" />} loading={posting} onClick={() => post(true)}>
+                    Post again
+                  </Button>
+                </div>
+              </div>
             ) : (
               <div className="rounded-2xl border border-brand-line bg-brand-soft p-4 text-sm font-medium text-ink" role="alert">
                 {errorMessage(postError)}
@@ -411,7 +434,7 @@ export function NewOrderScreen() {
               icon={<Send className="size-4" />}
               loading={posting}
               disabled={!canPost}
-              onClick={post}
+              onClick={() => post()}
               title={blockedByCredits ? "Buy credits to post orders" : undefined}
             >
               Post order

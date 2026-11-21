@@ -83,6 +83,12 @@ export interface KycDocument {
   updatedAt: string;
   hasFile?: boolean;
   fileType?: "image" | "pdf" | "word";
+  /** Licence, insurance, ID and right to work run out; NI and bank details don't. */
+  canExpire?: boolean;
+  /** YYYY-MM-DD, set by an admin; null when not recorded. */
+  expiresOn?: string | null;
+  /** "expiring" means within 30 days. */
+  expiryState?: "valid" | "expiring" | "expired" | null;
 }
 
 export interface DriverProfile {

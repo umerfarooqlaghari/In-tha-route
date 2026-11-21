@@ -54,6 +54,8 @@ export interface PostOrderInput {
   postcode: string;
   accessCode: string;
   note: string;
+  /** Post a receipt that is already posted, after the merchant chose "Post again". */
+  repeat?: boolean;
 }
 
 export interface NewDriverInput {
@@ -344,7 +346,17 @@ export function MerchantProvider({ user, children }: { user: AuthUser; children:
     return draft;
   };
 
-  const postOrder = async ({ template, prepMinutes, dispatchType, ownDriverId, address, postcode, accessCode, note }: PostOrderInput) => {
+  const postOrder = async ({
+    template,
+    prepMinutes,
+    dispatchType,
+    ownDriverId,
+    address,
+    postcode,
+    accessCode,
+    note,
+    repeat,
+  }: PostOrderInput) => {
     const res = await change<{ order: LiveOrder; dashboard: MerchantDashboard }>("POST", "/api/restaurant/orders", {
       source: template.source,
       externalOrderId: template.externalOrderId,
@@ -361,6 +373,7 @@ export function MerchantProvider({ user, children }: { user: AuthUser; children:
       dispatchType,
       ...(dispatchType === "own_driver" && { ownDriverId }),
       ...(template.receiptFileId && { receiptFileId: template.receiptFileId }),
+      ...(repeat && { repeat: true }),
     });
     return res.order;
   };

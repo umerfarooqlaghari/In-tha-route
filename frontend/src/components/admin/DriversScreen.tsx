@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import {
+  CalendarClock,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -296,6 +297,7 @@ function PlatformDriver({
   const toVerify = approved && d.kycDocuments.some((k) => k.status === "pending");
   const [open, setOpen] = useState(!approved && !rejected);
   const pct = (verified / Math.max(total, 1)) * 100;
+  const expired = d.kycDocuments.filter((k) => k.expiryState === "expired").length;
 
   return (
     <motion.div
@@ -344,6 +346,9 @@ function PlatformDriver({
         <div className="flex-1">
           <p className="text-[13px] font-semibold text-ink-2">
             {verified} of {total} documents verified
+            {expired > 0 && (
+              <span className="ml-2 font-bold text-brand">· {expired} expired</span>
+            )}
           </p>
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-alt">
             <motion.div
@@ -367,11 +372,11 @@ function PlatformDriver({
           >
             <div className="mt-3 space-y-1">
               {d.kycDocuments.map((k) => (
-                <li key={k.id}>
+                <li key={k.id} className="rounded-xl transition hover:bg-surface-alt/60">
                   <button
                     disabled={!k.hasFile}
                     onClick={() => onOpenDoc(k)}
-                    className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[13px] transition enabled:hover:bg-surface-alt"
+                    className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[13px]"
                   >
                     <DocIcon status={k.status} />
                     <span className="flex-1 truncate text-ink">{cleanTitle(k.title)}</span>
@@ -383,6 +388,7 @@ function PlatformDriver({
                       <span className="text-ink-3">Not uploaded</span>
                     )}
                   </button>
+                  {k.canExpire && k.hasFile && <DocExpiry doc={k} />}
                 </li>
               ))}
             </div>
@@ -434,6 +440,77 @@ function InHouseDriver({ driver: d, index }: { driver: DriverProfile; index: num
       </div>
       <Badge tone="info">No docs</Badge>
     </motion.div>
+  );
+}
+
+const expiryDate = (iso: string) =>
+  new Date(`${iso}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
+const daysUntil = (iso: string) => {
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  return Math.round((new Date(`${iso}T12:00:00`).getTime() - today.getTime()) / 86_400_000);
+};
+
+/** The date a document runs out: the admin types it in while checking the document. */
+function DocExpiry({ doc }: { doc: KycDocument }) {
+  const { setDocumentExpiry } = useAdmin();
+  const [value, setValue] = useState(doc.expiresOn ?? "");
+  const [saving, setSaving] = useState(false);
+  // Follow the server when it changes (another admin, or a new upload clearing it).
+  const [seen, setSeen] = useState(doc.expiresOn ?? "");
+  if ((doc.expiresOn ?? "") !== seen) {
+    setSeen(doc.expiresOn ?? "");
+    setValue(doc.expiresOn ?? "");
+  }
+
+  const save = async (next: string) => {
+    if ((next || null) === (doc.expiresOn ?? null) || saving) return;
+    setSaving(true);
+    const ok = await setDocumentExpiry(doc.id, next || null);
+    setSaving(false);
+    if (!ok) setValue(doc.expiresOn ?? "");
+  };
+
+  const days = doc.expiresOn ? daysUntil(doc.expiresOn) : null;
+  const state = doc.expiryState;
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-2.5 pb-2 pl-9 text-[12px]">
+      <label className="flex items-center gap-1.5 text-ink-3">
+        <CalendarClock className="size-3.5 shrink-0" />
+        <span className="font-semibold">Expires</span>
+        <input
+          type="date"
+          value={value}
+          disabled={saving}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={(e) => save(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          aria-label={`Expiry date for ${cleanTitle(doc.title)}`}
+          className={cn(
+            "h-8 rounded-lg border bg-surface px-2 text-[12px] text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/15",
+            state === "expired" ? "border-brand/50" : state === "expiring" ? "border-warning/50" : "border-line"
+          )}
+        />
+      </label>
+      {doc.expiresOn && state === "expired" && <Badge tone="brand">Expired {expiryDate(doc.expiresOn)}</Badge>}
+      {doc.expiresOn && state === "expiring" && (
+        <Badge tone="warning">{days === 0 ? "Expires today" : `Expires in ${days} day${days === 1 ? "" : "s"}`}</Badge>
+      )}
+      {!doc.expiresOn && <span className="text-ink-3">Not set</span>}
+      {doc.expiresOn && (
+        <button
+          type="button"
+          onClick={() => {
+            setValue("");
+            save("");
+          }}
+          className="font-semibold text-ink-3 underline-offset-2 hover:text-ink hover:underline"
+        >
+          Clear
+        </button>
+      )}
+    </div>
   );
 }
 

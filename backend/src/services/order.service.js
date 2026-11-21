@@ -313,9 +313,8 @@ async function getReceiptFileForDriver(orderId, driverId) {
 async function createOrder(user, input) {
   const config = await pricing.getConfig();
   const restaurant = await restaurants.ensureCoords(await restaurants.getWithCounts(user.restaurant_id));
-  // DUPLICATE RECEIPTS: turned off for testing, so the same receipt can be scanned and posted
-  // again and again. Before going live, uncomment this and the block in createOrder's transaction.
-  // await rejectDuplicate(db, restaurant.id, input); // fail fast, before the address lookups
+  // The same receipt again is stopped unless the merchant chose "Post again" (`repeat`).
+  if (!input.repeat) await rejectDuplicate(db, restaurant.id, input); // fail fast, before the address lookups
 
   if (input.dispatchType === 'hybrid' && restaurant.driver_policy !== 'hybrid') {
     throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed.', [
@@ -355,14 +354,13 @@ async function createOrder(user, input) {
   const fin = pricing.calculateOrderFinancials(config, dropoff.distanceMiles, 1, dispatchType, restaurant.custom_fee_gbp);
 
   const orderId = await db.withTransaction(async (client) => {
-    // DUPLICATE RECEIPTS (off for testing, see above). Uncomment before going live:
-    // one post at a time per order number, so two taps at once cannot both get through.
-    // if (input.externalOrderId) {
-    //   await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-    //     `order-ref|${restaurant.id}|${input.source}|${input.externalOrderId}`,
-    //   ]);
-    //   await rejectDuplicate(client, restaurant.id, input);
-    // }
+    // One post at a time per order number, so two taps at once cannot both get through.
+    if (input.externalOrderId && !input.repeat) {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `order-ref|${restaurant.id}|${input.source}|${input.externalOrderId}`,
+      ]);
+      await rejectDuplicate(client, restaurant.id, input);
+    }
     // Out of credits: no order can be posted, whoever delivers it. Own-driver orders use no credits.
     await credits.assertCanPost(
       client,

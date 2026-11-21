@@ -32,6 +32,8 @@ interface AdminState {
   releaseOrder: (id: string) => Promise<boolean>;
   approveDriver: (id: string) => Promise<boolean>;
   rejectDriver: (id: string, reason?: string) => Promise<boolean>;
+  /** When a driver's document runs out (YYYY-MM-DD); null clears it. */
+  setDocumentExpiry: (documentId: string, expiresOn: string | null) => Promise<boolean>;
   updateAlgorithm: (partial: Partial<AlgorithmConfig>) => Promise<boolean>;
   updateSteppedPayoutAt: (index: number, amountGbp: number) => Promise<boolean>;
   /** A merchant's own per-delivery fee; null goes back to the standard fee. */
@@ -188,6 +190,13 @@ export function AdminProvider({ user, children }: { user: AuthUser; children: Re
       attempt("POST", `/api/admin/orders/${id}/cancel`, reason ? { reason } : {}, "Order cancelled"),
     releaseOrder: (id) => attempt("POST", `/api/admin/orders/${id}/release`, undefined, "Order offered to other drivers"),
     approveDriver: (id) => attempt("POST", `/api/admin/drivers/${id}/approve`, undefined, "Driver approved"),
+    setDocumentExpiry: (documentId, expiresOn) =>
+      attempt(
+        "PATCH",
+        `/api/admin/kyc-documents/${documentId}/expiry`,
+        { expiresOn },
+        expiresOn ? "Expiry date saved" : "Expiry date removed"
+      ),
     rejectDriver: (id, reason) =>
       attempt("POST", `/api/admin/drivers/${id}/reject`, reason ? { reason } : {}, "Driver rejected"),
     updateAlgorithm,
