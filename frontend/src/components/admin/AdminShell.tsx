@@ -14,6 +14,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Store,
+  UserRound,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -34,6 +35,7 @@ export const NAV = [
   { href: "/admin/drivers", label: "Drivers", sub: "Approve & contract", icon: ShieldCheck },
   { href: "/admin/merchants", label: "Merchants", sub: "Partners, fees & access", icon: Store },
   { href: "/admin/credits", label: "Credits", sub: "Payments & usage", icon: Coins },
+  { href: "/admin/account", label: "Account", sub: "Profile, password & delete", icon: UserRound },
 ] as const;
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
@@ -387,6 +389,13 @@ function ProfileMenu() {
                 <p className="truncate text-xs text-ink-3">{user.email}</p>
               </div>
             </div>
+            <Link
+              href="/admin/account"
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center gap-3 border-b border-line px-4 py-3.5 text-sm font-semibold text-ink transition hover:bg-surface-alt"
+            >
+              <UserRound className="size-4" /> Account
+            </Link>
             <button
               onClick={() => {
                 logout();

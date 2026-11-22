@@ -56,8 +56,8 @@ export function MerchantSignupForm() {
       need("email", "Email");
       need("phone", "Phone");
       if (!v.password) e.password = "Password is required.";
-      else if (v.password.length < 8 || !/[A-Za-z]/.test(v.password) || !/\d/.test(v.password))
-        e.password = "Use at least 8 characters with a letter and a number.";
+      else if (v.password.length < 8 || !/[A-Z]/.test(v.password) || !/\d/.test(v.password))
+        e.password = "Use at least 8 characters with a capital letter and a number.";
       if (!v.confirmPassword) e.confirmPassword = "Please confirm your password.";
       else if (v.password && v.confirmPassword !== v.password) e.confirmPassword = "Passwords do not match.";
     } else {
@@ -83,7 +83,7 @@ export function MerchantSignupForm() {
     try {
       const session = await signupRequest({
         role: "restaurant",
-        email: v.email.trim(),
+        email: v.email.trim().toLowerCase(),
         password: v.password,
         fullName: v.fullName.trim(),
         phone: v.phone.trim(),
@@ -158,7 +158,7 @@ export function MerchantSignupForm() {
               value={v.password}
               onChange={set("password")}
               error={errors.password}
-              hint="At least 8 characters, with a letter and a number."
+              hint="At least 8 characters, with a capital letter and a number."
             />
             <Field
               label="Confirm password"

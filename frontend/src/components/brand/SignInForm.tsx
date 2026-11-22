@@ -56,7 +56,7 @@ export function SignInForm({
 
     setLoading(true);
     try {
-      const session = await loginRequest(email.trim(), password);
+      const session = await loginRequest(email.trim().toLowerCase(), password);
       if (session.user.role !== role) {
         // Don't keep a session for the wrong portal.
         request("POST", "/api/auth/logout", { refreshToken: session.tokens.refreshToken }).catch(() => {});

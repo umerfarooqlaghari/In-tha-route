@@ -1,6 +1,7 @@
 const express = require('express');
 
 const c = require('../controllers/restaurant.controller');
+const account = require('../controllers/account.controller');
 const { ROLES } = require('../constants/roles');
 const authenticate = require('../middleware/authenticate');
 const authorize = require('../middleware/authorize');
@@ -23,6 +24,9 @@ router.post('/orders/:id/find-drivers', h(c.findDriversAgain)); // nobody took i
 router.post('/orders/:id/assign-driver', h(c.assignOwnDriver)); // nobody took it: give it to my driver
 router.post('/drivers', h(c.addDriver)); // add an in-house driver
 router.patch('/policy', h(c.updatePolicy)); // delivery settings
+router.patch('/profile', h(account.updateRestaurantProfile)); // business name
+router.put('/logo', h(account.uploadLogo)); // business logo (JPEG, PNG or WebP)
+router.delete('/logo', h(account.removeLogo));
 router.get('/credits', h(c.creditsOverview)); // balance, deliveries left, activity
 router.post('/credits/checkout', h(c.buyCredits)); // card payment (Stripe Checkout)
 router.post('/credits/confirm', h(c.confirmCredits)); // back from Stripe

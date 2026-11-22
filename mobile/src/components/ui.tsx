@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
+  Image,
   ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
@@ -221,8 +222,10 @@ export function Button({
   loading,
   style,
   compact,
+  testID,
 }: {
   label: string;
+  testID?: string;
   onPress?: () => void;
   variant?: ButtonVariant;
   icon?: IconName;
@@ -243,6 +246,7 @@ export function Button({
     <Pressable
       disabled={disabled || loading}
       onPress={onPress}
+      testID={testID}
       // Without this VoiceOver also reads the icon's private-use glyph before the label.
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -454,8 +458,28 @@ export function Stepper({
 /* Rows, avatars, stats                                                        */
 /* -------------------------------------------------------------------------- */
 
-export function Avatar({ name, tone = 'neutral', size = 40 }: { name: string; tone?: Tone; size?: number }) {
+export function Avatar({
+  name,
+  tone = 'neutral',
+  size = 40,
+  imageUri,
+}: {
+  name: string;
+  tone?: Tone;
+  size?: number;
+  /** A picture (such as a merchant's logo) shown instead of the initials. */
+  imageUri?: string;
+}) {
   const t = TONES[tone];
+  if (imageUri) {
+    return (
+      <Image
+        source={{ uri: imageUri }}
+        accessibilityLabel={name}
+        style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: C.surfaceAlt }]}
+      />
+    );
+  }
   const initials = name
     .split(' ')
     .map((p) => p.charAt(0))

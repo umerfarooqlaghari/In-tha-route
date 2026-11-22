@@ -28,6 +28,7 @@ function toPartner(row) {
     activeOrdersCount: row.active_orders ?? 0,
     completedTodayCount: row.completed_today ?? 0,
     pickupSafetyNote: row.pickup_safety_note || '',
+    logoUrl: row.logo_file_id ? `/api/files/logos/${row.logo_file_id}` : null,
     coords: row.latitude != null ? { latitude: row.latitude, longitude: row.longitude } : null,
   };
 }
@@ -38,7 +39,11 @@ async function getWithCounts(id, client = db) {
 }
 
 async function listWithCounts(client = db) {
-  const { rows } = await client.query(`${WITH_COUNTS} ORDER BY r.name`);
+  // Deleted merchants are kept for the records but no longer listed.
+  const { rows } = await client.query(
+    `${WITH_COUNTS} WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = r.owner_user_id AND u.deleted_at IS NOT NULL)
+      ORDER BY r.name`
+  );
   return rows;
 }
 

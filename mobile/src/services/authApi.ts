@@ -18,6 +18,8 @@ export interface AuthUser {
     phone: string;
     driverPolicy: 'open_platform' | 'own_drivers' | 'hybrid';
     pickupSafetyNote: string | null;
+    /** Path of the merchant's logo on the API, or null. */
+    logoUrl?: string | null;
   };
   driver?: {
     id: string;

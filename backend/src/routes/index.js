@@ -9,6 +9,9 @@ router.use('/driver', require('./driver.routes'));
 router.use('/admin', require('./admin.routes'));
 router.use('/chat', require('./chat.routes'));
 
+// Merchant logos are public images (shown with a plain <img> on the web).
+router.get('/files/logos/:id', require('../utils/asyncHandler')(require('../controllers/account.controller').logo));
+
 /**
  * @swagger
  * /api/health:

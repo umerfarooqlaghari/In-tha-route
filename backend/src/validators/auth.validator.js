@@ -8,12 +8,21 @@ const emailSchema = z
   .max(254, 'Email is too long.')
   .pipe(z.email('Enter a valid email address.'));
 
+// Applies when a password is set (signup, adding a driver, the seeded admin). Login does not
+// re-check it, so accounts created before the capital-letter rule still sign in.
 // bcrypt only reads the first 72 bytes, so longer passwords are rejected rather than truncated.
 const passwordSchema = z
   .string({ error: 'Password is required.' })
-  .min(8, 'Password must be at least 8 characters.')
-  .refine((v) => Buffer.byteLength(v, 'utf8') <= 72, 'Password must be at most 72 characters.')
-  .refine((v) => /[A-Za-z]/.test(v) && /\d/.test(v), 'Password must contain a letter and a number.');
+  .superRefine((v, ctx) => {
+    // One message at a time, the first rule the password misses.
+    const problem =
+      v.length < 8 ? 'Password must be at least 8 characters.'
+      : Buffer.byteLength(v, 'utf8') > 72 ? 'Password must be at most 72 characters.'
+      : !/[A-Za-z]/.test(v) || !/\d/.test(v) ? 'Password must contain a letter and a number.'
+      : !/[A-Z]/.test(v) ? 'Password must contain at least one capital letter.'
+      : null;
+    if (problem) ctx.addIssue({ code: 'custom', message: problem });
+  });
 
 const fullNameSchema = z
   .string({ error: 'Full name is required.' })

@@ -38,6 +38,7 @@ import { useChat } from '@/context/ChatContext';
 import { CreditsScreen, OutOfCredits, creditCheck, isLow } from '@/components/restaurant/MerchantCredits';
 import { LiveRidersScreen } from '@/components/restaurant/LiveRiders';
 import { pickImage } from '@/utils/pickImage';
+import { AccountScreen } from '@/components/AccountScreen';
 
 const C = Brand.colors;
 
@@ -53,6 +54,8 @@ export function RestaurantView() {
 function RestaurantScreens() {
   const { activeScreen } = useInThaRoute();
   switch (activeScreen) {
+    case 'account':
+      return <AccountScreen />;
     case 'live_orders':
       return <LiveOrdersScreen />;
     case 'own_drivers':
@@ -892,7 +895,7 @@ function MyDriversScreen() {
     setFormError(null);
     const res = await addRestaurantOwnDriver({
       name: name.trim(),
-      email: email.trim(),
+      email: email.trim().toLowerCase(),
       password,
       phone: phone.trim(),
       vehicle,
@@ -962,7 +965,7 @@ function MyDriversScreen() {
           label="Password"
           value={password}
           onChangeText={setPassword}
-          placeholder="At least 8 characters"
+          placeholder="8+ characters, a capital and a number"
           secureTextEntry
           autoCapitalize="none"
           autoCorrect={false}

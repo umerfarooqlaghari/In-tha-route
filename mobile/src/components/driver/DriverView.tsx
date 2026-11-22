@@ -31,12 +31,15 @@ import { errorMessage } from '@/context/InThaRouteContext';
 import { UploadedFile } from '@/components/UploadedFile';
 import { chooseDocument } from '@/utils/pickImage';
 import { decodePolyline } from '@/utils/polyline';
+import { AccountScreen } from '@/components/AccountScreen';
 
 const C = Brand.colors;
 
 export function DriverView() {
   const { activeScreen } = useInThaRoute();
   switch (activeScreen) {
+    case 'account':
+      return <AccountScreen />;
     case 'open_pool':
       return <OrderPoolScreen />;
     case 'earnings':

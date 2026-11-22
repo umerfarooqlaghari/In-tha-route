@@ -16,6 +16,7 @@ import {
   RefreshCw,
   ScanLine,
   Settings2,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -29,6 +30,7 @@ import { LiveDot } from "@/components/ui";
 import { ToastProvider } from "@/components/ui/toast";
 import { ChatProvider, useChat } from "@/lib/merchant-chat";
 import { MerchantProvider, isWaiting, useMerchant, useMerchantSession } from "@/lib/merchant-store";
+import { logoSrc } from "@/lib/api";
 import { cn, initials, isLive, shortName } from "@/lib/format";
 import { NoDriversPrompt } from "./NoDrivers";
 
@@ -42,6 +44,7 @@ export const MERCHANT_NAV = [
   { group: "Team", href: "/merchant/messages", label: "Messages", sub: "Chat with your drivers", icon: MessagesSquare },
   { group: "Account", href: "/merchant/credits", label: "Credits", sub: "Balance and top-ups", icon: Coins },
   { group: "Account", href: "/merchant/settings", label: "Delivery settings", sub: "Who delivers your orders", icon: Settings2 },
+  { group: "Account", href: "/merchant/account", label: "Account", sub: "Profile, password and delete", icon: UserRound },
 ] as const;
 
 const isActive = (href: string, pathname: string) =>
@@ -349,6 +352,7 @@ function SyncIndicator() {
 
 function ProfileMenu() {
   const { user, logout, restaurant } = useMerchant();
+  const logo = logoSrc(user.restaurant?.logoUrl);
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, right: 0 });
@@ -390,9 +394,14 @@ function ProfileMenu() {
         aria-expanded={open}
         aria-label="Account menu"
       >
-        <span className="grid size-9 place-items-center rounded-full bg-white text-sm font-extrabold text-crimson-800">
-          {initials(user.fullName) || "M"}
-        </span>
+        {logo ? (
+          // eslint-disable-next-line @next/next/no-img-element -- served by the API
+          <img src={logo} alt="" className="size-9 rounded-full bg-white object-cover" />
+        ) : (
+          <span className="grid size-9 place-items-center rounded-full bg-white text-sm font-extrabold text-crimson-800">
+            {initials(user.fullName) || "M"}
+          </span>
+        )}
         <span className="hidden text-sm font-semibold md:block">{user.fullName.split(" ")[0]}</span>
         <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} />
       </button>
@@ -409,15 +418,27 @@ function ProfileMenu() {
               className="fixed z-[80] w-72 max-w-[calc(100vw-32px)] overflow-hidden rounded-2xl border border-line bg-surface text-ink shadow-[var(--shadow-float)]"
             >
               <div className="flex items-center gap-3 border-b border-line p-4">
-                <span className="brand-gradient grid size-11 shrink-0 place-items-center rounded-2xl text-sm font-extrabold text-white">
-                  {initials(user.fullName) || "M"}
-                </span>
+                {logo ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- served by the API
+                  <img src={logo} alt="" className="size-11 shrink-0 rounded-2xl bg-surface-alt object-cover" />
+                ) : (
+                  <span className="brand-gradient grid size-11 shrink-0 place-items-center rounded-2xl text-sm font-extrabold text-white">
+                    {initials(user.fullName) || "M"}
+                  </span>
+                )}
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold">{user.fullName}</p>
                   <p className="truncate text-xs text-ink-3">{user.email}</p>
                   {restaurant && <p className="truncate text-xs text-ink-3">{restaurant.name}</p>}
                 </div>
               </div>
+              <Link
+                href="/merchant/account"
+                onClick={() => setOpen(false)}
+                className="flex w-full items-center gap-3 border-b border-line px-4 py-3.5 text-sm font-semibold text-ink transition hover:bg-surface-alt"
+              >
+                <UserRound className="size-4" /> Account
+              </Link>
               <button
                 onClick={() => {
                   logout();

@@ -220,6 +220,21 @@ export function endDisabled(portal: Portal) {
   write(portal, null);
 }
 
+/** The account's details changed (name, email, logo): keep the session, show the new details. */
+export function updateSessionUser(portal: Portal, user: AuthUser) {
+  const s = getSession(portal);
+  if (s) write(portal, { ...s, user });
+}
+
+/** The account was deleted: leave without calling the server again, and say so on the sign-in page. */
+export function endDeleted(portal: Portal) {
+  setNotice(portal, "Your account has been deleted.");
+  write(portal, null);
+}
+
+/** Full address of a merchant's logo (the API gives a path). */
+export const logoSrc = (logoUrl?: string | null) => (logoUrl ? `${API_URL}${logoUrl}` : undefined);
+
 /** A valid access token, renewed if needed. */
 export async function accessToken(portal: Portal): Promise<string> {
   const s = getSession(portal);

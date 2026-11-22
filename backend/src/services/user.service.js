@@ -5,7 +5,7 @@ const USER_SELECT = `
          u.last_login_at, u.created_at,
          r.id AS restaurant_id, r.name AS restaurant_name, r.address AS restaurant_address,
          r.postcode AS restaurant_postcode, r.phone AS restaurant_phone,
-         r.driver_policy, r.pickup_safety_note,
+         r.driver_policy, r.pickup_safety_note, r.logo_file_id,
          d.id AS driver_id, d.driver_type, d.employer_restaurant_id, d.vehicle,
          d.plate_number, d.status AS driver_status
     FROM users u
@@ -14,10 +14,13 @@ const USER_SELECT = `
 `;
 
 const findByEmail = async (email, client = db) =>
-  (await client.query(`${USER_SELECT} WHERE u.email = $1`, [email])).rows[0] || null;
+  (await client.query(`${USER_SELECT} WHERE u.email = lower(trim($1))`, [email])).rows[0] || null;
 
 const findById = async (id, client = db) =>
   (await client.query(`${USER_SELECT} WHERE u.id = $1`, [id])).rows[0] || null;
+
+/** Where a merchant's logo is served (relative to the API), or null. */
+const logoUrl = (fileId) => (fileId ? `/api/files/logos/${fileId}` : null);
 
 /** Shape returned to clients. Never includes the password hash. */
 function toPublicUser(row) {
@@ -39,6 +42,7 @@ function toPublicUser(row) {
       phone: row.restaurant_phone,
       driverPolicy: row.driver_policy,
       pickupSafetyNote: row.pickup_safety_note,
+      logoUrl: logoUrl(row.logo_file_id),
     };
   }
   if (row.driver_id) {
@@ -54,4 +58,4 @@ function toPublicUser(row) {
   return user;
 }
 
-module.exports = { findByEmail, findById, toPublicUser };
+module.exports = { findByEmail, findById, toPublicUser, logoUrl };

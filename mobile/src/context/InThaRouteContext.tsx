@@ -341,6 +341,7 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
     { key: 'own_drivers', title: 'My drivers', subtitle: 'Your in-house team', icon: 'people-outline' },
     { key: 'credits', title: 'Credits', subtitle: 'Balance & usage', icon: 'wallet-outline' },
     { key: 'dispatch_policy', title: 'Delivery settings', subtitle: 'Who delivers your orders', icon: 'options-outline' },
+    { key: 'account', title: 'Account', subtitle: 'Profile, password & delete', icon: 'person-circle-outline' },
   ],
   driver: [
     { key: 'live_route', title: 'Drive', subtitle: 'Offers & navigation', icon: 'navigate-outline' },
@@ -349,6 +350,7 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
     { key: 'earnings', title: 'Earnings', subtitle: 'Payouts & trips', icon: 'wallet-outline' },
     { key: 'order_history', title: 'Past orders', subtitle: 'Deliveries & pay', icon: 'receipt-outline' },
     { key: 'kyc_docs', title: 'Documents', subtitle: 'Licence, insurance & ID', icon: 'document-text-outline' },
+    { key: 'account', title: 'Account', subtitle: 'Profile, password & delete', icon: 'person-circle-outline' },
   ],
   admin: [
     { key: 'live_ledger', title: 'Overview', subtitle: 'Live map & revenue', icon: 'map-outline' },
@@ -357,6 +359,7 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
     { key: 'driver_kyc', title: 'Drivers', subtitle: 'Approve & contract', icon: 'shield-checkmark-outline' },
     { key: 'partner_restaurants', title: 'Merchants', subtitle: 'Partners & policies', icon: 'storefront-outline' },
     { key: 'admin_credits', title: 'Credits', subtitle: 'Payments & usage', icon: 'wallet-outline' },
+    { key: 'account', title: 'Account', subtitle: 'Profile, password & delete', icon: 'person-circle-outline' },
   ],
 };
 
@@ -413,6 +416,10 @@ interface InThaRouteContextType {
   /** Enter the app with a session from the signup or login API. */
   signIn: (session: AuthSession) => void;
   logout: () => void;
+  /** The account's details changed (name, email, logo): show and keep the new ones. */
+  updateUser: (user: AuthUser) => void;
+  /** The account was deleted on the server: leave the app without calling it again. */
+  accountDeleted: () => void;
 
   /** True once the first dashboard for this account has loaded. */
   isDashboardReady: boolean;
@@ -562,6 +569,12 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
     setApiSession(next.tokens);
     enter(next.user);
     saveSession(next);
+  };
+
+  const updateUser = (next: AuthUser) => {
+    setUser(next);
+    const refreshToken = currentRefreshToken();
+    if (refreshToken) saveSession({ user: next, tokens: { refreshToken } } as AuthSession);
   };
 
   const logout = () => {
@@ -720,7 +733,7 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
   const screens = useMemo(
     () =>
       role === 'driver' && driverApproval !== 'approved'
-        ? ROLE_SCREENS.driver.filter((s) => s.key === 'kyc_docs')
+        ? ROLE_SCREENS.driver.filter((s) => s.key === 'kyc_docs' || s.key === 'account')
         : ROLE_SCREENS[role],
     [role, driverApproval]
   );
@@ -954,6 +967,8 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         user,
         signIn,
         logout,
+        updateUser,
+        accountDeleted: signOutLocally,
         isDashboardReady: !!data && data.role === role,
         dashboardError,
         refreshDashboard,

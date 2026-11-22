@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { logoUri } from '@/components/AccountScreen';
 import { isLowOnCredits } from '@/components/admin/AdminCredits';
 import { Avatar, IconButton } from '@/components/ui';
 import { CreditsPill } from '@/components/restaurant/MerchantCredits';
@@ -60,7 +61,7 @@ export function AppHeader() {
           <View style={styles.right} onLayout={(e) => setRightW(e.nativeEvent.layout.width)}>
             {role === 'restaurant' && <CreditsPill />}
             <Pressable onPress={() => setDrawerOpen(true)} hitSlop={8}>
-              <Avatar name={user?.fullName ?? persona.name} tone="primary" size={40} />
+              <Avatar name={user?.fullName ?? persona.name} tone="primary" size={40} imageUri={logoUri(user?.restaurant?.logoUrl)} />
             </Pressable>
           </View>
         </View>
@@ -158,7 +159,7 @@ export function AppHeader() {
           ]}>
           {/* Profile */}
           <View style={styles.profile}>
-            <Avatar name={profileName} tone="primary" size={52} />
+            <Avatar name={profileName} tone="primary" size={52} imageUri={logoUri(user?.restaurant?.logoUrl)} />
             <View style={styles.profileText}>
               <Text style={styles.profileName} numberOfLines={1}>
                 {profileName}

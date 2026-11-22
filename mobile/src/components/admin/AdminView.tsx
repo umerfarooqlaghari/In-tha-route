@@ -29,6 +29,7 @@ import { Brand, formatGbp, sourceColor } from '@/constants/brand';
 import { coordsForPostcode } from '@/constants/geo';
 import { DriverPolicy, DriverProfile, KycDocument, LiveOrder, RestaurantPartner, useInThaRoute } from '@/context/InThaRouteContext';
 import { UploadedFile } from '@/components/UploadedFile';
+import { AccountScreen } from '@/components/AccountScreen';
 
 const C = Brand.colors;
 const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
@@ -78,6 +79,8 @@ export function AdminView() {
   };
 
   switch (activeScreen) {
+    case 'account':
+      return <AccountScreen />;
     case 'admin_orders':
       return <LiveOrdersScreen filter={orderFilter} onFilter={setOrderFilter} />;
     case 'pricing_algorithm':

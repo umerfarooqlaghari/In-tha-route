@@ -42,7 +42,7 @@ function LoginForm({ onBack }: { onBack: () => void }) {
 
     setLoading(true);
     try {
-      signIn(await loginRequest(email.trim(), password));
+      signIn(await loginRequest(email.trim().toLowerCase(), password));
     } catch (err) {
       setLoading(false);
       if (err instanceof ApiError && Object.keys(err.fields).length) setErrors(err.fields);

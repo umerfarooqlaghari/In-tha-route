@@ -57,6 +57,7 @@ export function SignupScreen({
     need('email', email, 'Email');
     need('phone', phone, 'Phone');
     if (!password) e.password = 'Password is required.';
+    else if (!/[A-Z]/.test(password)) e.password = 'Password must contain at least one capital letter.';
     if (!confirmPassword) e.confirmPassword = 'Please confirm your password.';
     else if (password && confirmPassword !== password) e.confirmPassword = 'Passwords do not match.';
     if (isRestaurant) {
@@ -75,7 +76,7 @@ export function SignupScreen({
     setFormError(null);
     if (Object.keys(local).length) return;
 
-    const base = { email: email.trim(), password, fullName: fullName.trim(), phone: phone.trim() };
+    const base = { email: email.trim().toLowerCase(), password, fullName: fullName.trim(), phone: phone.trim() };
     const input: SignupInput = isRestaurant
       ? {
           ...base,
@@ -157,7 +158,7 @@ export function SignupScreen({
           textContentType="password"
         />
         {!errors.password && (
-          <Text style={styles.help}>At least 8 characters, with a letter and a number.</Text>
+          <Text style={styles.help}>At least 8 characters, with a capital letter and a number.</Text>
         )}
         <Field
           label="Confirm password"

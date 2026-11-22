@@ -284,7 +284,7 @@ function AddDriverModal({ open, onClose }: { open: boolean; onClose: () => void 
     setErrors({});
     setFormError(null);
     try {
-      await addDriver({ ...f, fullName: f.fullName.trim(), email: f.email.trim(), phone: f.phone.trim(), plateNumber: f.plateNumber.trim(), vehicle });
+      await addDriver({ ...f, fullName: f.fullName.trim(), email: f.email.trim().toLowerCase(), phone: f.phone.trim(), plateNumber: f.plateNumber.trim(), vehicle });
       toast({ tone: "success", title: "Driver added", body: `${f.fullName.trim()} can now sign in to the app.` });
       setF(empty);
       onClose();
@@ -302,7 +302,7 @@ function AddDriverModal({ open, onClose }: { open: boolean; onClose: () => void 
         <Field label="Full name" value={f.fullName} onChange={set("fullName")} placeholder="e.g. Sam Patel" error={errors.fullName} autoFocus />
         <Field label="Email (for login)" type="email" value={f.email} onChange={set("email")} placeholder="sam@example.com" icon={<Mail className="size-4" />} error={errors.email} autoComplete="off" />
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Password" type="password" value={f.password} onChange={set("password")} placeholder="At least 8 characters" icon={<Lock className="size-4" />} error={errors.password} autoComplete="new-password" />
+          <Field label="Password" type="password" value={f.password} onChange={set("password")} placeholder="8+ characters, a capital and a number" icon={<Lock className="size-4" />} error={errors.password} autoComplete="new-password" />
           <Field
             label="Confirm password"
             type="password"

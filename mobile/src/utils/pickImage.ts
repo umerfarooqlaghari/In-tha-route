@@ -70,6 +70,54 @@ export function chooseImage(title: string): Promise<PickedImage | null> {
   });
 }
 
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+/** A square logo from the camera or the photo library (the user crops it). */
+async function pickLogo(source: 'camera' | 'library'): Promise<PickedImage | null> {
+  try {
+    if (source === 'camera' && !(await ImagePicker.requestCameraPermissionsAsync()).granted) {
+      Alert.alert('Camera access needed', 'Allow camera access in Settings to take a photo.', [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Open Settings', onPress: () => Linking.openSettings() },
+      ]);
+      return null;
+    }
+    const options: ImagePicker.ImagePickerOptions = { ...OPTIONS, quality: 0.7, allowsEditing: true, aspect: [1, 1] };
+    const result =
+      source === 'camera' ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
+    if (result.canceled) return null;
+    const asset = result.assets[0];
+    if (!asset?.base64) {
+      Alert.alert('Photo not available', 'That photo could not be read. Please try another one.');
+      return null;
+    }
+    if (asset.base64.length * 0.75 > LOGO_MAX_BYTES) {
+      Alert.alert('Logo too large', 'Please choose a smaller image (under 2 MB).');
+      return null;
+    }
+    return { base64: asset.base64, mimeType: 'image/jpeg' };
+  } catch {
+    Alert.alert('Photos not available', 'The image could not be opened. Please try another one.');
+    return null;
+  }
+}
+
+/** Asks "Take photo" or "Choose from library" for the merchant's logo. */
+export function chooseLogo(): Promise<PickedImage | null> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Your logo',
+      undefined,
+      [
+        { text: 'Take photo', onPress: () => pickLogo('camera').then(resolve) },
+        { text: 'Choose from library', onPress: () => pickLogo('library').then(resolve) },
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(null) }
+    );
+  });
+}
+
 export const PDF = 'application/pdf';
 export const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 // Driver documents: the server takes up to 8 MB for a PDF or .docx file.

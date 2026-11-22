@@ -128,6 +128,12 @@ router.post('/refresh', authLimiter, asyncHandler(controller.refresh));
 router.post('/logout', asyncHandler(controller.logout));
 router.get('/me', authenticate, asyncHandler(controller.me));
 
+// Your own account (every role): name and email, password, and deleting it.
+const account = require('../controllers/account.controller');
+router.patch('/account', authenticate, authLimiter, asyncHandler(account.updateAccount));
+router.put('/account/password', authenticate, authLimiter, asyncHandler(account.changePassword));
+router.delete('/account', authenticate, authLimiter, asyncHandler(account.deleteAccount));
+
 /**
  * @swagger
  * /api/auth/push-token:

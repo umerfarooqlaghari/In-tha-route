@@ -345,6 +345,8 @@ export interface AuthUser {
     phone: string;
     driverPolicy: DriverPolicy;
     pickupSafetyNote: string | null;
+    /** Path of the merchant's logo on the API, or null. */
+    logoUrl?: string | null;
   };
 }
 
