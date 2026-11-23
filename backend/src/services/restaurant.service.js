@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const AppError = require('../utils/AppError');
 const geo = require('./geo.service');
+const pricing = require('./pricing.service');
 
 const WITH_COUNTS = `
   SELECT r.*,
@@ -25,6 +26,8 @@ function toPartner(row) {
     postcode: row.postcode,
     phone: row.phone,
     driverPolicy: row.driver_policy,
+    // Its own pool time in seconds, or null for the admin's standard time.
+    poolWindowSeconds: row.pool_window_seconds ?? null,
     activeOrdersCount: row.active_orders ?? 0,
     completedTodayCount: row.completed_today ?? 0,
     pickupSafetyNote: row.pickup_safety_note || '',
@@ -60,12 +63,25 @@ async function ensureCoords(row, client = db) {
   return { ...row, latitude: hit.latitude, longitude: hit.longitude };
 }
 
-async function updatePolicy(id, driverPolicy) {
-  const { rowCount } = await db.query(
-    'UPDATE restaurants SET driver_policy = $1, updated_at = now() WHERE id = $2',
-    [driverPolicy, id]
-  );
-  if (rowCount === 0) throw new AppError(404, 'RESTAURANT_NOT_FOUND', 'Restaurant not found.');
+/**
+ * Delivery settings: who delivers, and the merchant's own pool time (null: the admin's
+ * standard time). Orders waiting in the pool follow a new pool time straight away.
+ */
+async function updatePolicy(id, { driverPolicy, poolWindowSeconds }) {
+  await db.withTransaction(async (client) => {
+    const before = await pricing.poolWindowFor(client, id);
+    const { rowCount } = await client.query(
+      `UPDATE restaurants
+          SET driver_policy = coalesce($2, driver_policy),
+              pool_window_seconds = CASE WHEN $3 THEN $4::int ELSE pool_window_seconds END,
+              updated_at = now()
+        WHERE id = $1`,
+      [id, driverPolicy ?? null, poolWindowSeconds !== undefined, poolWindowSeconds ?? null]
+    );
+    if (rowCount === 0) throw new AppError(404, 'RESTAURANT_NOT_FOUND', 'Restaurant not found.');
+    const after = await pricing.poolWindowFor(client, id);
+    await pricing.shiftPoolWindows(client, { bySeconds: after - before, restaurantId: id });
+  });
 }
 
 /**

@@ -6,7 +6,7 @@ import { useState } from "react";
 
 import { AnimatedNumber, Card, CardHeader, Segmented, Skeleton, Stepper } from "@/components/ui";
 import { useAdmin } from "@/lib/admin-store";
-import { formatGbp, ORDINALS } from "@/lib/format";
+import { formatGbp, formatPoolTime, ORDINALS } from "@/lib/format";
 import type { AlgorithmConfig } from "@/lib/types";
 
 type NudgeKey = "baseDistanceMiles" | "extraMileRestaurantChargeGbp" | "extraMileDriverPayoutGbp" | "offerRadiusMiles";
@@ -184,6 +184,14 @@ export function PricingScreen() {
                 { value: "miles", label: "Miles" },
                 { value: "none", label: "No limit" },
               ]}
+            />
+          </SettingRow>
+          <SettingRow title="Time in pool" sub="Then the order leaves the pool · merchants can set their own">
+            <Stepper
+              name="Time in pool"
+              value={formatPoolTime(algorithm.poolWindowSeconds)}
+              onDecrement={() => updateAlgorithm({ poolWindowSeconds: Math.max(30, algorithm.poolWindowSeconds - 30) })}
+              onIncrement={() => updateAlgorithm({ poolWindowSeconds: Math.min(1800, algorithm.poolWindowSeconds + 30) })}
             />
           </SettingRow>
           {!algorithm.noDistanceLimit && (

@@ -39,7 +39,7 @@ export const MERCHANT_NAV = [
   { group: "Orders", href: "/merchant/orders", label: "Live orders", sub: "Prep timers and couriers", icon: ReceiptText },
   { group: "Orders", href: "/merchant/history", label: "Past orders", sub: "Delivered and cancelled", icon: History },
   { group: "Orders", href: "/merchant/analytics", label: "Analytics", sub: "Sales, speed and busy hours", icon: BarChart3 },
-  { group: "Team", href: "/merchant/riders", label: "Live riders", sub: "Your riders on the map", icon: MapPinned },
+  { group: "Team", href: "/merchant/riders", label: "Live riders", sub: "Drivers on the map", icon: MapPinned },
   { group: "Team", href: "/merchant/drivers", label: "My drivers", sub: "Your in-house team", icon: Users },
   { group: "Team", href: "/merchant/messages", label: "Messages", sub: "Chat with your drivers", icon: MessagesSquare },
   { group: "Account", href: "/merchant/credits", label: "Credits", sub: "Balance and top-ups", icon: Coins },

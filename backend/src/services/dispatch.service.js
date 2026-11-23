@@ -26,10 +26,6 @@ const REOFFER_AFTER_MINUTES = 10; // an order taken off a driver is not shown ba
 const OFFER_TIMEOUT_SECONDS =
   Number(process.env.OFFER_TIMEOUT_SECONDS) > 0 ? Number(process.env.OFFER_TIMEOUT_SECONDS) : 120;
 
-// How long an order stays in the open pool before it leaves it, if nobody takes it.
-const POOL_WINDOW_SECONDS =
-  Number(process.env.POOL_WINDOW_SECONDS) > 0 ? Number(process.env.POOL_WINDOW_SECONDS) : 120;
-
 // Orders a driver still has to collect or deliver: these count towards the max per run.
 const ACTIVE_STATUSES = "('batched_offered', 'driver_assigned', 'picked_up')";
 
@@ -108,13 +104,19 @@ const withinReach = (here, pickup, config) => {
   return !pickup || pickup.latitude == null || geo.straightLineMiles(here, pickup) <= config.offerRadiusMiles;
 };
 
+// A new pool order rings a driver's phone this many times, this far apart (about 10 seconds),
+// unless it is taken, removed or leaves the pool in between.
+const NEW_ORDER_RINGS = 3;
+const RING_EVERY_MS = 5000;
+
 /**
  * Pushes a new pool order to every driver who can take it right now: online, within the
  * driver radius of the restaurant, with room in their run. Called when an order is posted
- * or comes back to the pool.
+ * or comes back to the pool. The push repeats twice more, 5 seconds apart, to the same
+ * drivers while they can still take it.
  * @returns {Promise<string[]>} the drivers told
  */
-async function notifyNearbyDrivers(orderId) {
+async function notifyNearbyDrivers(orderId, { ring = 1, only = null } = {}) {
   const push = require('./push.service');
   const config = await pricing.getConfig();
   const { rows: found } = await db.query(
@@ -122,7 +124,8 @@ async function notifyNearbyDrivers(orderId) {
             r.name AS restaurant, r.latitude, r.longitude
        FROM orders o JOIN restaurants r ON r.id = o.restaurant_id
       WHERE o.id = $1 AND o.batch_id IS NULL AND o.dispatch_type = 'open_platform'
-        AND o.status IN ('preparing', 'ready_for_pickup')`,
+        AND o.status IN ('preparing', 'ready_for_pickup')
+        AND (o.pool_expires_at IS NULL OR o.pool_expires_at > now())`,
     [orderId]
   );
   const order = found[0];
@@ -143,6 +146,7 @@ async function notifyNearbyDrivers(orderId) {
   );
   const told = [];
   for (const d of drivers) {
+    if (only && !only.includes(d.id)) continue;
     const inHouse = d.driver_type === 'restaurant_own';
     const here = freshLocation(d);
     if (d.active_orders >= config.maxBatchSize) continue;
@@ -152,6 +156,11 @@ async function notifyNearbyDrivers(orderId) {
     ).driverPayoutGbp;
     await push.newOrderNearby(d.user_id, { ...order, pay, inHouse });
     told.push(d.id);
+  }
+  if (told.length && ring < NEW_ORDER_RINGS) {
+    setTimeout(() => {
+      notifyNearbyDrivers(orderId, { ring: ring + 1, only: told }).catch(() => {});
+    }, RING_EVERY_MS).unref();
   }
   return told;
 }
@@ -236,7 +245,7 @@ async function decline(driverId, { remember = true } = {}) {
     }
     const config = await pricing.getConfig(client);
     const { rows } = await client.query(
-      `SELECT id, distance_miles, dispatch_type, (SELECT custom_fee_gbp FROM restaurants r WHERE r.id = orders.restaurant_id) AS custom_fee_gbp
+      `SELECT id, restaurant_id, distance_miles, dispatch_type, (SELECT custom_fee_gbp FROM restaurants r WHERE r.id = orders.restaurant_id) AS custom_fee_gbp
          FROM orders WHERE batch_id = $1 FOR UPDATE`,
       [batch.id]
     );
@@ -247,7 +256,7 @@ async function decline(driverId, { remember = true } = {}) {
                 status = ${BACK_TO_POOL_STATUS}, restaurant_fee_gbp = $1, driver_payout_gbp = $2,
                 pool_expires_at = now() + make_interval(secs => $4)
           WHERE id = $3`,
-        [fin.restaurantFeeGbp, fin.driverPayoutGbp, o.id, POOL_WINDOW_SECONDS]
+        [fin.restaurantFeeGbp, fin.driverPayoutGbp, o.id, await pricing.poolWindowFor(client, o.restaurant_id)]
       );
       if (remember) await rememberDecline(client, driverId, o.id);
     }
@@ -616,7 +625,7 @@ async function releaseToPool(orderId) {
               restaurant_fee_gbp = $2, driver_payout_gbp = $3, no_driver_alert_at = NULL,
               pool_expires_at = now() + make_interval(secs => $4)
         WHERE id = $1`,
-      [orderId, fin.restaurantFeeGbp, fin.driverPayoutGbp, POOL_WINDOW_SECONDS]
+      [orderId, fin.restaurantFeeGbp, fin.driverPayoutGbp, await pricing.poolWindowFor(client, order.restaurant_id)]
     );
     if (order.assigned_driver_id) await rememberDecline(client, order.assigned_driver_id, orderId);
     return { order, driverUserId };
@@ -663,7 +672,7 @@ async function findDriversAgain(restaurantId, orderId) {
     await lockWaitingOrder(client, restaurantId, orderId);
     await client.query(
       `UPDATE orders SET pool_expires_at = now() + make_interval(secs => $2) WHERE id = $1`,
-      [orderId, POOL_WINDOW_SECONDS]
+      [orderId, await pricing.poolWindowFor(client, restaurantId)]
     );
     await client.query('DELETE FROM batch_declines WHERE order_id = $1', [orderId]);
   });
@@ -696,7 +705,6 @@ async function giveWaitingOrderToOwnDriver(restaurantId, orderId, driverId) {
 }
 
 module.exports = {
-  POOL_WINDOW_SECONDS,
   rejectPoolOrder,
   findDriversAgain,
   giveWaitingOrderToOwnDriver,

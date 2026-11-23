@@ -1,4 +1,4 @@
-const { test, before, after } = require('node:test');
+const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('supertest');
 
@@ -33,6 +33,7 @@ const setRadius = (miles) =>
 const moveDriver = (where) => request(app).put('/api/driver/location').set(bearer(driver)).send(where);
 const driverView = async () => (await request(app).get('/api/driver/dashboard').set(bearer(driver))).body;
 const seesOrder = async (id) => (await driverView()).orders.some((o) => o.id === id);
+const seesOrderById = seesOrder;
 
 let orderId;
 
@@ -139,6 +140,50 @@ test('with "No distance limit" on, a platform driver sees the order from any dis
   assert.equal(await seesOrder(orderId), true);
 });
 
+test('each pool order shows how far the driver is from the restaurant, to 0.1 mi', async () => {
+  await pool.query(`UPDATE orders SET pool_expires_at = now() + interval '1 hour'`);
+  await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ noDistanceLimit: true });
+  const awayFor = async () => (await driverView()).orders.find((o) => o.id === orderId).pickupMilesAway;
+
+  for (const miles of [0.4, 5, 12.6]) {
+    await moveDriver(milesSouth(miles));
+    assert.equal(await awayFor(), miles, `driver ${miles} mi south`);
+  }
+  // A driver in Karachi is thousands of miles away, not the order's delivery trip.
+  await moveDriver({ latitude: 24.8607, longitude: 67.0011 });
+  const away = await awayFor();
+  assert.ok(away > 3900 && away < 4000, `Karachi to East Sheen: ${away} mi`);
+  // No location: no distance to show.
+  await request(app).delete('/api/driver/location').set(bearer(driver));
+  assert.equal(await awayFor(), null);
+  await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ noDistanceLimit: false });
+});
+
+test('the merchant\'s live riders include every online platform driver, without contact details', async () => {
+  const shopView = async () =>
+    (await request(app).get('/api/restaurant/dashboard').set(bearer(merchant))).body.platformRiders;
+
+  await moveDriver(milesSouth(2));
+  let riders = await shopView();
+  assert.equal(riders.length, 1);
+  assert.equal(riders[0].name, 'Radius R.');
+  assert.equal(riders[0].isOnline, true);
+  assert.equal(riders[0].location.latitude, milesSouth(2).latitude);
+  assert.equal(riders[0].email, undefined);
+  assert.equal(riders[0].phone, undefined);
+
+  // Location off: still listed as online, with no position.
+  await request(app).delete('/api/driver/location').set(bearer(driver));
+  riders = await shopView();
+  assert.equal(riders[0].location, null);
+
+  // Offline: gone from the list.
+  await request(app).put('/api/driver/availability').set(bearer(driver)).send({ online: false });
+  assert.deepEqual(await shopView(), []);
+  await request(app).put('/api/driver/availability').set(bearer(driver)).send({ online: true });
+  assert.equal((await shopView()).length, 1);
+});
+
 test('"No distance limit" must be true or false', async () => {
   const res = await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ noDistanceLimit: 'yes' });
   assert.equal(res.status, 400);
@@ -149,4 +194,97 @@ test('an order whose pool time has run out is no longer shown, at any radius', a
   await moveDriver(milesSouth(1));
   await pool.query(`UPDATE orders SET pool_expires_at = now() - interval '1 second'`);
   assert.equal(await seesOrder(orderId), false);
+});
+
+describe('pool time set by the admin and the merchant', () => {
+  let id;
+  const secondsLeft = async () =>
+    (await pool.query(`SELECT extract(epoch FROM pool_expires_at - now())::float AS s FROM orders WHERE id = $1`, [id])).rows[0].s;
+  const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 3, `expected ~${expected}s, got ${actual}s`);
+  const setPolicy = (body) => request(app).patch('/api/restaurant/policy').set(bearer(merchant)).send(body);
+
+  before(async () => {
+    await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ noDistanceLimit: true });
+    const o = await request(app).post('/api/restaurant/orders').set(bearer(merchant)).send({
+      source: 'Deliveroo', externalOrderId: '#POOLTIME', customerName: 'Ben T.', customerPhone: '+442033195036',
+      deliveryAddress: '20 Rosemont Rd, Richmond', postcode: 'TW10 6QN', prepMinutes: 20, dispatchType: 'open_platform', items: [],
+    });
+    assert.equal(o.status, 201, JSON.stringify(o.body));
+    id = o.body.order?.id ?? o.body.dashboard.orders.find((x) => x.externalOrderId === '#POOLTIME').id;
+  });
+
+  test('a new order gets the standard 2 minutes', async () => {
+    near(await secondsLeft(), 120);
+  });
+
+  test('the admin changes the standard time: orders in the pool follow it at once', async () => {
+    const res = await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ poolWindowSeconds: 300 });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    near(await secondsLeft(), 300);
+    const shop = (await request(app).get('/api/restaurant/dashboard').set(bearer(merchant))).body;
+    assert.equal(shop.algorithm.poolWindowSeconds, 300);
+    assert.equal(shop.restaurants[0].poolWindowSeconds, null);
+  });
+
+  test('the merchant sets its own time: its orders follow it, and the admin\'s changes no longer apply to them', async () => {
+    assert.equal((await setPolicy({ poolWindowSeconds: 60 })).status, 200);
+    near(await secondsLeft(), 60);
+    await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ poolWindowSeconds: 600 });
+    near(await secondsLeft(), 60);
+    const shop = (await request(app).get('/api/restaurant/dashboard').set(bearer(merchant))).body;
+    assert.equal(shop.restaurants[0].poolWindowSeconds, 60);
+  });
+
+  test('"Find drivers again" starts the merchant\'s own time again', async () => {
+    await pool.query(`UPDATE orders SET pool_expires_at = now() - interval '1 second' WHERE id = $1`, [id]);
+    assert.equal((await request(app).post(`/api/restaurant/orders/${id}/find-drivers`).set(bearer(merchant))).status, 200);
+    near(await secondsLeft(), 60);
+  });
+
+  test('back to the standard time, and a shorter time can end the window at once', async () => {
+    assert.equal((await setPolicy({ poolWindowSeconds: null })).status, 200);
+    near(await secondsLeft(), 600);
+    // 50 seconds into its window, the standard time drops to 30 seconds: the window is over.
+    await pool.query(`UPDATE orders SET pool_expires_at = now() + interval '550 seconds' WHERE id = $1`, [id]);
+    await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ poolWindowSeconds: 30 });
+    assert.ok((await secondsLeft()) < 0, 'the window has already run out');
+    assert.equal(await seesOrderById(id), false);
+  });
+
+  test('pool times outside 30 s to 30 min are refused', async () => {
+    assert.equal((await setPolicy({ poolWindowSeconds: 20 })).status, 400);
+    assert.equal((await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ poolWindowSeconds: 3600 })).status, 400);
+    assert.equal((await setPolicy({})).status, 400);
+  });
+
+  test('a new order rings each driver 3 times, 5 seconds apart, and stops once it is taken', async () => {
+    const push = require('../src/services/push.service');
+    const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+    const real = push.newOrderNearby;
+    // Let rings started by earlier tests finish first.
+    await pause(11_000);
+    let rings = 0;
+    push.newOrderNearby = async () => { rings += 1; };
+    try {
+      await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ poolWindowSeconds: 300 });
+      await moveDriver(milesSouth(1));
+      await request(app).post(`/api/restaurant/orders/${id}/find-drivers`).set(bearer(merchant));
+      await pause(500);
+      assert.equal(rings, 1);
+      await pause(11_000);
+      assert.equal(rings, 3);
+
+      // Taken after the first ring: no more rings.
+      rings = 0;
+      await request(app).post(`/api/restaurant/orders/${id}/find-drivers`).set(bearer(merchant));
+      await pause(500);
+      assert.equal(rings, 1);
+      const took = await request(app).post(`/api/driver/pool/${id}/add`).set(bearer(driver));
+      assert.equal(took.body.ok, true, JSON.stringify(took.body));
+      await pause(6_000);
+      assert.equal(rings, 1);
+    } finally {
+      push.newOrderNearby = real;
+    }
+  });
 });

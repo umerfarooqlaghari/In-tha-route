@@ -183,6 +183,13 @@ async function listBatch(batchId, { maskDelivered }) {
 }
 
 /**
+ * Straight-line miles from the driver's last GPS position to the restaurant, the same measure
+ * the driver radius uses (to 0.1 mi). Null when either position is unknown.
+ */
+const milesFrom = (here, pickup) =>
+  here && pickup ? Number(geo.straightLineMiles(here, pickup).toFixed(1)) : null;
+
+/**
  * The open pool as one platform driver sees it: open orders within the driver radius of
  * where they are, while they have room in their run. Each shows what it would pay them.
  * @returns {Promise<{orders: object[], room: object}>}
@@ -210,8 +217,8 @@ async function listPool(driverRow, config) {
       inHouse || dispatch.withinReach(room.here, coordsOf(r.pickup_latitude, r.pickup_longitude), config)
     )
     .slice(0, 50)
-    .map((r) =>
-      toLiveOrder(r, {
+    .map((r) => ({
+      ...toLiveOrder(r, {
         view: 'pool',
         nextPayoutGbp: pricing.calculateOrderFinancials(
           config,
@@ -219,8 +226,9 @@ async function listPool(driverRow, config) {
           room.activeOrders + 1,
           inHouse ? 'own_driver' : 'open_platform'
         ).driverPayoutGbp,
-      })
-    );
+      }),
+      pickupMilesAway: milesFrom(room.here, coordsOf(r.pickup_latitude, r.pickup_longitude)),
+    }));
   return { orders, room };
 }
 
@@ -404,7 +412,7 @@ async function createOrder(user, input) {
         user.id,
         receiptFileId,
         hybrid,
-        dispatch.POOL_WINDOW_SECONDS,
+        await pricing.poolWindowFor(client, restaurant.id),
       ]
     );
     if (input.dispatchType === 'own_driver') {

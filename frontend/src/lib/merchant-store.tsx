@@ -19,6 +19,7 @@ import type {
   CreditSummary,
   DriverPolicy,
   DriverProfile,
+  PlatformRider,
   LiveOrder,
   MerchantDashboard,
   ReceiptTemplate,
@@ -75,6 +76,8 @@ interface MerchantState {
   orders: LiveOrder[];
   /** The merchant's own drivers. */
   drivers: DriverProfile[];
+  /** Every online platform driver (live riders map). */
+  platformRiders: PlatformRider[];
   credits: CreditSummary | null;
   error: string | null;
   syncedAt: number;
@@ -93,6 +96,8 @@ interface MerchantState {
   assignOwnDriver: (orderId: string, driverId: string) => Promise<boolean>;
   addDriver: (input: NewDriverInput) => Promise<void>;
   updatePolicy: (policy: DriverPolicy) => Promise<boolean>;
+  /** Its own pool time in seconds, or null for the admin's standard time. */
+  updatePoolTime: (seconds: number | null) => Promise<boolean>;
   /** Replace the credit summary (after a payment), without waiting for the next refresh. */
   setCredits: (c: CreditSummary) => void;
 }
@@ -392,12 +397,27 @@ export function MerchantProvider({ user, children }: { user: AuthUser; children:
     return ok;
   };
 
+  const updatePoolTime = async (seconds: number | null) => {
+    const previous = restaurant?.poolWindowSeconds ?? null;
+    const patch = (value: number | null) =>
+      setState((prev) =>
+        prev.data
+          ? { ...prev, data: { ...prev.data, restaurants: prev.data.restaurants.map((r) => ({ ...r, poolWindowSeconds: value })) } }
+          : prev
+      );
+    patch(seconds);
+    const ok = await attempt("PATCH", "/api/restaurant/policy", { poolWindowSeconds: seconds }, "Pool time saved");
+    if (!ok) patch(previous);
+    return ok;
+  };
+
   const value: MerchantState = {
     user,
     data,
     restaurant,
     orders,
     drivers,
+    platformRiders: data?.platformRiders ?? [],
     credits: data?.credits ?? null,
     error,
     syncedAt: state.receivedAt,
@@ -425,6 +445,7 @@ export function MerchantProvider({ user, children }: { user: AuthUser; children:
       });
     },
     updatePolicy,
+    updatePoolTime,
     setCredits: (c) => setState((prev) => (prev.data ? { ...prev, data: { ...prev.data, credits: c } } : prev)),
   };
 

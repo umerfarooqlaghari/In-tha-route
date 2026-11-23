@@ -20,11 +20,24 @@ import { api } from '@/services/apiClient';
  */
 export type PushData = { type?: 'offer' | 'order' | 'chat' | 'account'; conversationId?: string; orderId?: string };
 
-// While the app is open, chat messages already appear live, so they do not need a banner.
+// New pool orders this phone has already rung for. Null until the first pool arrives
+// (orders already there when the app opens stay quiet).
+let announced: Set<string> | null = null;
+// The orders in the driver's pool right now: a ring stops once its order is no longer here.
+let inPool = new Set<string>();
+const RING_FOR = 'local-pool-order';
+// A new order rings this many times, this far apart (about 10 seconds), like the server's pushes.
+const RINGS = 3;
+const RING_EVERY_MS = 5000;
+
+// While the app is open, chat messages already appear live, so they do not need a banner;
+// and the app rings for new orders itself, so the server's order pushes stay silent then
+// (they still refresh the pool straight away).
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
-    const data = notification.request.content.data as PushData;
-    const quiet = data?.type === 'chat' && AppState.currentState === 'active';
+    const data = notification.request.content.data as PushData & { source?: string };
+    const open = AppState.currentState === 'active';
+    const quiet = open && (data?.type === 'chat' || (data?.type === 'offer' && data.source !== RING_FOR));
     return {
       shouldShowBanner: !quiet,
       shouldShowList: !quiet,
@@ -51,6 +64,72 @@ function ensureAndroidChannels() {
     }),
   ]).then(() => undefined);
   return channelsReady;
+}
+
+/** A new order the driver can take, as the pool shows it. */
+type PoolOrder = { id: string; restaurantName: string; postcode: string; driverPayoutGbp?: number };
+
+/**
+ * Rings (sound, vibration and a banner) for every order that is new in the driver's pool,
+ * as soon as the app sees it: three times over about 10 seconds, stopping early once the
+ * order is taken, rejected or leaves the pool. Works while the app is open on both iOS and Android, without
+ * waiting for a server push. The first pool after opening the app only sets the starting point.
+ */
+export function announceNewPoolOrders(pool: PoolOrder[]) {
+  // Orders that left the pool (taken, rejected, timed out): stop ringing, take the banner away.
+  const now = new Set(pool.map((o) => o.id));
+  for (const id of inPool) {
+    if (!now.has(id)) Notifications.dismissNotificationAsync(`pool-${id}`).catch(() => {});
+  }
+  inPool = now;
+  if (!announced) {
+    announced = new Set(now);
+    return;
+  }
+  for (const o of pool) {
+    if (announced.has(o.id)) continue;
+    announced.add(o.id);
+    ring(o, 1);
+  }
+}
+
+/** One ring for a new order; rings again 5 s later while it is still in the pool. */
+function ring(o: PoolOrder, count: number) {
+  const pay = o.driverPayoutGbp ? ` · £${o.driverPayoutGbp.toFixed(2)}` : '';
+  ensureAndroidChannels()
+    .then(() =>
+      Notifications.scheduleNotificationAsync({
+        // The same id each time, so the banner is replaced rather than stacked.
+        identifier: `pool-${o.id}`,
+        content: {
+          title: `New order${pay}`,
+          body: `${o.restaurantName} to ${o.postcode}. First driver to accept gets it.`,
+          data: { type: 'offer', orderId: o.id, source: RING_FOR },
+          sound: 'default',
+        },
+        trigger: Platform.OS === 'android' ? { channelId: 'orders' } : null,
+      })
+    )
+    .catch(() => {});
+  if (count >= RINGS) return;
+  setTimeout(() => {
+    if (inPool.has(o.id) && AppState.currentState === 'active') ring(o, count + 1);
+  }, RING_EVERY_MS);
+}
+
+// In the background the server's pushes ring; on return, start again from what is there
+// so an order is never rung twice.
+AppState.addEventListener('change', (state) => {
+  if (state === 'background') {
+    announced = null;
+    inPool = new Set();
+  }
+});
+
+/** Forget which orders rang (sign-out, or the driver goes offline). */
+export function resetPoolAnnouncements() {
+  announced = null;
+  inPool = new Set();
 }
 
 let registeredToken: string | null = null;

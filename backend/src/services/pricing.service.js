@@ -15,12 +15,42 @@ function toConfig(row) {
     maxPickupRadiusMiles: Number(row.max_pickup_radius_miles),
     offerRadiusMiles: Number(row.offer_radius_miles),
     noDistanceLimit: row.no_distance_limit === true,
+    poolWindowSeconds: row.pool_window_seconds,
   };
 }
 
 async function getConfig(client = db) {
   const { rows } = await client.query('SELECT * FROM pricing_config WHERE id = 1');
   return toConfig(rows[0]);
+}
+
+/** How long a merchant's orders stay in the open pool: its own time, or the admin's standard time. */
+async function poolWindowFor(client, restaurantId) {
+  const { rows } = await client.query(
+    `SELECT coalesce(r.pool_window_seconds, c.pool_window_seconds) AS seconds
+       FROM pricing_config c LEFT JOIN restaurants r ON r.id = $1 WHERE c.id = 1`,
+    [restaurantId]
+  );
+  return rows[0].seconds;
+}
+
+/**
+ * A pool time changed: orders waiting in the pool right now keep the moment they entered it,
+ * so their end moves by the difference (a shorter time can end their window at once).
+ * Only one merchant's orders, or (`standardOnly`) every merchant using the standard time.
+ */
+async function shiftPoolWindows(client, { bySeconds, restaurantId = null, standardOnly = false }) {
+  if (!bySeconds) return;
+  await client.query(
+    `UPDATE orders o SET pool_expires_at = o.pool_expires_at + make_interval(secs => $1)
+       FROM restaurants r
+      WHERE r.id = o.restaurant_id
+        AND o.batch_id IS NULL AND o.dispatch_type = 'open_platform'
+        AND o.status IN ('preparing', 'ready_for_pickup') AND o.pool_expires_at > now()
+        AND ($2::uuid IS NULL OR o.restaurant_id = $2)
+        AND (NOT $3 OR r.pool_window_seconds IS NULL)`,
+    [bySeconds, restaurantId, standardOnly]
+  );
 }
 
 /** The admin can charge one merchant a different per-delivery fee; otherwise the standard fee applies. */
@@ -105,7 +135,8 @@ async function updateConfig(partial, userId) {
          extra_mile_restaurant_charge_gbp = $3, extra_mile_driver_payout_gbp = $4,
          max_batch_size = $5, stepped_driver_payouts_gbp = $6,
          max_prep_time_window_minutes = $7, max_pickup_radius_miles = $8,
-         offer_radius_miles = $10, no_distance_limit = $11, updated_by = $9, updated_at = now()
+         offer_radius_miles = $10, no_distance_limit = $11, pool_window_seconds = $12,
+         updated_by = $9, updated_at = now()
        WHERE id = 1`,
       [
         next.baseDistanceMiles,
@@ -119,8 +150,11 @@ async function updateConfig(partial, userId) {
         userId,
         next.offerRadiusMiles,
         next.noDistanceLimit,
+        next.poolWindowSeconds,
       ]
     );
+    // Orders in the pool now follow the new standard time straight away.
+    await shiftPoolWindows(client, { bySeconds: next.poolWindowSeconds - current.poolWindowSeconds, standardOnly: true });
 
     const live = await client.query(
       `SELECT o.id, o.distance_miles, o.batch_position, r.custom_fee_gbp FROM orders o
@@ -170,6 +204,8 @@ async function setCustomFee(restaurantId, customFeeGbp) {
 }
 
 module.exports = {
+  poolWindowFor,
+  shiftPoolWindows,
   getConfig,
   calculateOrderFinancials,
   feePerDelivery,

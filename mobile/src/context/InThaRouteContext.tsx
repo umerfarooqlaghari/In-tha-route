@@ -11,7 +11,12 @@ import {
   setApiSession,
 } from '@/services/apiClient';
 import { useDriverLocation } from '@/services/driverLocation';
-import { unregisterForPush, usePushNotifications } from '@/services/pushNotifications';
+import {
+  announceNewPoolOrders,
+  resetPoolAnnouncements,
+  unregisterForPush,
+  usePushNotifications,
+} from '@/services/pushNotifications';
 import { clearSession, loadSession, saveSession } from '@/services/sessionStore';
 import type { PickedImage } from '@/utils/pickImage';
 
@@ -92,7 +97,10 @@ export interface LiveOrder {
   postcode: string;
   deliveryInstructions: string;
   restaurantPickupNote: string;
+  /** Delivery trip: restaurant to customer. */
   distanceMiles: number;
+  /** Pool only: straight-line miles from the driver's GPS position to the restaurant, or null if unknown. */
+  pickupMilesAway?: number | null;
   prepMinutes: number;
   readyAt?: string;
   /** Counts down locally between refreshes. */
@@ -184,6 +192,8 @@ export interface RestaurantPartner {
   postcode: string;
   phone: string;
   driverPolicy: DriverPolicy;
+  /** Its own time (seconds) in the pool, or null for the admin's standard time. */
+  poolWindowSeconds?: number | null;
   activeOrdersCount: number;
   completedTodayCount: number;
   pickupSafetyNote: string;
@@ -255,6 +265,8 @@ export interface AlgorithmConfig {
   offerRadiusMiles: number;
   /** On: every platform driver sees every open order, however far away. */
   noDistanceLimit: boolean;
+  /** Standard time (seconds) an order stays in the pool; a merchant may set its own. */
+  poolWindowSeconds: number;
 }
 
 /** How full a driver's run is (the admin's max orders at once applies to every driver). */
@@ -303,6 +315,16 @@ export interface RouteEstimate {
   source?: 'road' | 'straight';
 }
 
+/** An online platform driver as a merchant's live map shows them (short name, no contact details). */
+export interface PlatformRider {
+  id: string;
+  name: string;
+  driverType: 'platform_contracted';
+  isOnline: true;
+  location: (LatLng & { updatedAt: string }) | null;
+  activeOrders: number;
+}
+
 /** What `GET /api/{role}/dashboard` returns. Every change endpoint returns a fresh one too. */
 interface Dashboard {
   role: UserRole;
@@ -323,6 +345,8 @@ interface Dashboard {
   totals?: AdminTotals;
   /** Restaurant: its credits. */
   credits?: CreditSummary;
+  /** Restaurant: every online platform driver, for the live riders map. */
+  platformRiders?: PlatformRider[];
 }
 
 export interface RoleScreen {
@@ -338,7 +362,7 @@ export const ROLE_SCREENS: Record<UserRole, RoleScreen[]> = {
     { key: 'live_orders', title: 'Live orders', subtitle: 'Prep timers & couriers', icon: 'time-outline' },
     { key: 'past_orders', title: 'Past orders', subtitle: 'Delivered orders', icon: 'receipt-outline' },
     { key: 'analytics', title: 'Analytics', subtitle: 'Sales, orders & trends', icon: 'stats-chart-outline' },
-    { key: 'live_riders', title: 'Live riders', subtitle: 'Your drivers on the map', icon: 'locate-outline' },
+    { key: 'live_riders', title: 'Live riders', subtitle: 'Drivers on the map', icon: 'locate-outline' },
     { key: 'messages', title: 'Messages', subtitle: 'Chats with drivers', icon: 'chatbubbles-outline' },
     { key: 'own_drivers', title: 'My drivers', subtitle: 'Your in-house team', icon: 'people-outline' },
     { key: 'credits', title: 'Credits', subtitle: 'Balance & usage', icon: 'wallet-outline' },
@@ -377,6 +401,7 @@ const DEFAULT_ALGORITHM: AlgorithmConfig = {
   maxPickupRadiusMiles: 0.8,
   offerRadiusMiles: 3,
   noDistanceLimit: false,
+  poolWindowSeconds: 120,
 };
 
 const POLL_MS = 12_000;
@@ -433,6 +458,8 @@ interface InThaRouteContextType {
 
   orders: LiveOrder[];
   drivers: DriverProfile[];
+  /** Restaurant: every online platform driver (live riders map). */
+  platformRiders: PlatformRider[];
   restaurants: RestaurantPartner[];
   algorithm: AlgorithmConfig;
   activeRestaurantId: string;
@@ -491,6 +518,8 @@ interface InThaRouteContextType {
     plateNumber: string;
   }) => Promise<AddDriverResult>;
   updateRestaurantPolicy: (restaurantId: string, policy: DriverPolicy) => Promise<boolean>;
+  /** Merchant: its own pool time in seconds, or null for the admin's standard time. */
+  updatePoolTime: (restaurantId: string, seconds: number | null) => Promise<boolean>;
 
   // Admin
   pricingSummary: PricingSummary | null;
@@ -694,6 +723,24 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
       }
     },
   });
+
+  // Ring when a new order lands in an online driver's pool.
+  useEffect(() => {
+    const d = dash.data;
+    if (!d || !isLoggedIn || role !== 'driver' || d.role !== 'driver' || !d.isOnline) {
+      resetPoolAnnouncements();
+      return;
+    }
+    announceNewPoolOrders(
+      d.orders.filter(
+        (o) =>
+          !o.batchId &&
+          o.status !== 'delivered' &&
+          o.dispatchType === 'open_platform' &&
+          (o.poolSecondsLeft === undefined || o.poolSecondsLeft > 0)
+      )
+    );
+  }, [dash.data, isLoggedIn, role]);
 
   // One clock for every countdown on screen.
   useEffect(() => {
@@ -922,6 +969,19 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
     return ok;
   };
 
+  const updatePoolTime = async (restaurantId: string, seconds: number | null) => {
+    const previous = data?.restaurants.find((r) => r.id === restaurantId)?.poolWindowSeconds ?? null;
+    const show = (value: number | null) =>
+      patchData((d) => ({
+        ...d,
+        restaurants: d.restaurants.map((r) => (r.id === restaurantId ? { ...r, poolWindowSeconds: value } : r)),
+      }));
+    show(seconds);
+    const ok = await attempt(() => call('PATCH', '/api/restaurant/policy', { poolWindowSeconds: seconds }));
+    if (!ok) show(previous);
+    return ok;
+  };
+
   // Admin
   const approveDriverKyc = (driverId: string) =>
     attempt(() => call('POST', `/api/admin/drivers/${driverId}/approve`));
@@ -978,6 +1038,7 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         dashboardSyncedAt: dash.receivedAt,
         orders,
         drivers: data?.drivers ?? [],
+        platformRiders: data?.platformRiders ?? [],
         restaurants: data?.restaurants ?? [],
         algorithm,
         activeRestaurantId: data?.activeRestaurantId ?? user?.restaurant?.id ?? '',
@@ -1009,6 +1070,7 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         releaseOrder,
         addRestaurantOwnDriver,
         updateRestaurantPolicy,
+        updatePoolTime,
         pricingSummary: data?.pricingSummary ?? null,
         totals: data?.totals ?? null,
         approveDriverKyc,

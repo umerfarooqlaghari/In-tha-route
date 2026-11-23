@@ -22,8 +22,9 @@ import {
   Sheet,
   SourceBadge,
   Stat,
+  Stepper,
 } from '@/components/ui';
-import { Brand, formatCountdown, formatGbp, sourceColor } from '@/constants/brand';
+import { Brand, formatCountdown, formatGbp, formatPoolTime, sourceColor } from '@/constants/brand';
 import { coordsForPostcode } from '@/constants/geo';
 import {
   DriverPolicy,
@@ -1031,8 +1032,12 @@ const POLICIES: {
 ];
 
 function DeliverySettingsScreen() {
-  const { restaurants, activeRestaurantId, updateRestaurantPolicy, algorithm } = useInThaRoute();
+  const { restaurants, activeRestaurantId, updateRestaurantPolicy, updatePoolTime, algorithm } = useInThaRoute();
   const restaurant = restaurants.find((r) => r.id === activeRestaurantId) ?? restaurants[0];
+  const ownTime = restaurant.poolWindowSeconds ?? null;
+  const poolTime = ownTime ?? algorithm.poolWindowSeconds;
+  const setPoolTime = (delta: number) =>
+    updatePoolTime(restaurant.id, Math.max(30, Math.min(1800, poolTime + delta)));
 
   return (
     <Screen>
@@ -1061,6 +1066,29 @@ function DeliverySettingsScreen() {
           </Pressable>
         );
       })}
+
+      <SectionLabel>Time in the order pool</SectionLabel>
+      <Card>
+        <View style={styles.rowGap12}>
+          <View style={styles.flexText}>
+            <Text style={styles.cardTitle}>Time in pool</Text>
+            <Text style={styles.muted}>
+              {ownTime == null ? 'Standard time · then the order leaves the pool' : 'Your time · then the order leaves the pool'}
+            </Text>
+          </View>
+          <Stepper
+            name="Time in pool"
+            value={formatPoolTime(poolTime)}
+            onDecrement={() => setPoolTime(-30)}
+            onIncrement={() => setPoolTime(30)}
+          />
+        </View>
+        {ownTime != null && (
+          <Pressable onPress={() => updatePoolTime(restaurant.id, null)} accessibilityRole="button" hitSlop={8}>
+            <Text style={styles.link}>{`Use the standard time (${formatPoolTime(algorithm.poolWindowSeconds)})`}</Text>
+          </Pressable>
+        )}
+      </Card>
 
       <SectionLabel>Billing</SectionLabel>
       <Card>
@@ -1099,6 +1127,8 @@ const styles = StyleSheet.create({
   flex1: { flex: 1 },
   flex2: { flex: 2 },
   flexText: { flex: 1, minWidth: 0, gap: 2 },
+  rowGap12: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  link: { ...Brand.type.captionStrong, color: C.primary },
   fullWidth: { alignSelf: 'stretch', gap: 10 },
   gap2: { gap: 2 },
   gap8: { gap: 8 },

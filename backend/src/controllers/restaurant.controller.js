@@ -23,6 +23,8 @@ const restaurantPricing = (config, customFeeGbp) => ({
   maxPickupRadiusMiles: config.maxPickupRadiusMiles,
   offerRadiusMiles: config.offerRadiusMiles,
   noDistanceLimit: config.noDistanceLimit,
+  // The admin's standard pool time; the merchant's own (if set) is on its partner record.
+  poolWindowSeconds: config.poolWindowSeconds,
 });
 
 async function loadRestaurant(user) {
@@ -34,9 +36,10 @@ async function loadRestaurant(user) {
 /** Everything the restaurant screens show, in one response. */
 async function buildDashboard(user) {
   const restaurant = await loadRestaurant(user);
-  const [liveOrders, ownDrivers, config, creditSummary] = await Promise.all([
+  const [liveOrders, ownDrivers, platformRiders, config, creditSummary] = await Promise.all([
     orders.listLiveForRestaurant(restaurant.id),
     drivers.listByRestaurant(restaurant.id),
+    drivers.listOnlinePlatformRiders(),
     pricing.getConfig(),
     credits.summaryFor(restaurant.id),
   ]);
@@ -46,6 +49,8 @@ async function buildDashboard(user) {
     restaurants: [restaurants.toPartner(restaurant)],
     orders: liveOrders,
     drivers: ownDrivers,
+    // Every online platform driver, for the live riders map.
+    platformRiders,
     algorithm: restaurantPricing(config, restaurant.custom_fee_gbp),
     credits: creditSummary,
   };
@@ -171,8 +176,7 @@ async function addDriver(req, res) {
 }
 
 async function updatePolicy(req, res) {
-  const { driverPolicy } = parse(v.policySchema, req.body);
-  await restaurants.updatePolicy(req.user.restaurant_id, driverPolicy);
+  await restaurants.updatePolicy(req.user.restaurant_id, parse(v.policySchema, req.body));
   res.json({ dashboard: await buildDashboard(req.user) });
 }
 

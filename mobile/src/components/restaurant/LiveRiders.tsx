@@ -27,9 +27,12 @@ const ago = (iso: string, now: number) => {
   return `${Math.floor(s / 60)} min ago`;
 };
 
-/** Your own riders: who is online, where they are and how far from the shop, live (same as the web). */
+/**
+ * Your own riders and every online platform rider: who is online, where they are and how far
+ * from the shop, live (same as the web).
+ */
 export function LiveRidersScreen() {
-  const { drivers, restaurants, activeRestaurantId, dashboardSyncedAt } = useInThaRoute();
+  const { drivers, platformRiders, restaurants, activeRestaurantId, dashboardSyncedAt } = useInThaRoute();
   const restaurant = restaurants.find((r) => r.id === activeRestaurantId) ?? restaurants[0];
   const [focus, setFocus] = useState<{ key: string; coordinate: LatLng } | null>(null);
 
@@ -37,9 +40,12 @@ export function LiveRidersScreen() {
   // The "x ago" labels follow the last refresh (every few seconds).
   const now = dashboardSyncedAt;
 
-  const riders = drivers
-    .filter((d) => d.driverType === 'restaurant_own')
-    .map((d) => ({ d, miles: d.isOnline && d.location && shop ? milesBetween(shop, d.location) : null }))
+  const team = drivers.filter((d) => d.driverType === 'restaurant_own');
+  const riders = [
+    ...team.map((d) => ({ d, platform: false })),
+    ...platformRiders.map((d) => ({ d, platform: true })),
+  ]
+    .map(({ d, platform }) => ({ d, platform, miles: d.isOnline && d.location && shop ? milesBetween(shop, d.location) : null }))
     .sort((a, b) => {
       const rank = (x: typeof a) => (x.d.isOnline ? (x.miles != null ? 0 : 1) : 2);
       return rank(a) - rank(b) || (a.miles ?? 0) - (b.miles ?? 0) || a.d.name.localeCompare(b.d.name);
@@ -104,16 +110,24 @@ export function LiveRidersScreen() {
             style={styles.flex1}
           />
           <View style={styles.vDivider} />
-          <Stat label={`Team · ${riders.length - online.length} offline`} value={`${riders.length}`} style={styles.flex1} />
+          <Stat
+            label={`Team · ${team.filter((d) => !d.isOnline).length} offline`}
+            value={`${team.length}`}
+            style={styles.flex1}
+          />
         </View>
       </Card>
 
-      <SectionLabel>Your riders</SectionLabel>
+      <SectionLabel>Drivers</SectionLabel>
       <Card>
         {riders.length === 0 ? (
-          <EmptyState icon="people-outline" title="No drivers yet" subtitle="Add your in-house drivers under My drivers." />
+          <EmptyState
+            icon="people-outline"
+            title="No drivers online"
+            subtitle="Platform drivers appear here when they go online. Add your in-house drivers under My drivers."
+          />
         ) : (
-          riders.map(({ d, miles }, i) => {
+          riders.map(({ d, miles, platform }, i) => {
             const busy = (d.activeOrders ?? 0) > 0;
             const canFocus = miles != null;
             return (
@@ -137,6 +151,7 @@ export function LiveRidersScreen() {
                       {d.name}
                     </Text>
                     <Text style={styles.muted} numberOfLines={1}>
+                      {platform ? 'Platform · ' : 'Your team · '}
                       {!d.isOnline
                         ? 'Offline'
                         : miles == null

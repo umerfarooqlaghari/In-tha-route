@@ -114,6 +114,10 @@ function useBusy() {
 /** An order whose time in the pool has run out is gone from every driver's pool at once. */
 const stillInPool = (o: LiveOrder) => o.poolSecondsLeft === undefined || o.poolSecondsLeft > 0;
 
+/** "0.4 mi", "12.6 mi", "3,912 mi": tenths close by, whole miles once far away. */
+const formatMilesAway = (miles: number) =>
+  miles < 100 ? `${miles.toFixed(1)} mi` : `${String(Math.round(miles)).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} mi`;
+
 const shortArea = (address: string) => {
   const parts = address.split(',').map((p) => p.trim());
   return parts[parts.length - 1] || address;
@@ -606,10 +610,17 @@ function OrderPoolScreen() {
                 </View>
               )}
               <Divider />
-              <Text style={styles.poolMeta} numberOfLines={1}>
-                {o.distanceMiles} mi ·{' '}
-                {o.remainingSeconds > 0 ? `Ready ${formatCountdown(o.remainingSeconds)}` : 'Ready'}
-              </Text>
+              <View style={styles.gap2}>
+                {o.pickupMilesAway != null && (
+                  <Text style={styles.poolMeta} numberOfLines={1}>
+                    {formatMilesAway(o.pickupMilesAway)} from you
+                  </Text>
+                )}
+                <Text style={o.pickupMilesAway != null ? styles.muted : styles.poolMeta} numberOfLines={1}>
+                  {o.distanceMiles} mi delivery trip ·{' '}
+                  {o.remainingSeconds > 0 ? `Ready ${formatCountdown(o.remainingSeconds)}` : 'Ready'}
+                </Text>
+              </View>
               <View style={styles.poolActions}>
                 <Button
                   label="Reject"
@@ -881,7 +892,7 @@ function PastOrdersScreen() {
               />
             </Card>
             <Card>
-              <DetailRow label="Distance" value={`${selected.distanceMiles} mi`} />
+              <DetailRow label="Delivery trip" value={`${selected.distanceMiles} mi`} />
               <DetailRow
                 label="In run"
                 value={

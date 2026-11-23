@@ -20,11 +20,11 @@ import {
 import { useState } from "react";
 
 import { LiveMap, type MapPin } from "@/components/admin/LiveMap";
-import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Modal, Skeleton } from "@/components/ui";
+import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Modal, Skeleton, Stepper } from "@/components/ui";
 import { Field } from "@/components/ui/field";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, errorMessage } from "@/lib/api";
-import { cn, formatGbp, initials, VEHICLE_SHORT } from "@/lib/format";
+import { cn, formatGbp, formatPoolTime, initials, VEHICLE_SHORT } from "@/lib/format";
 import { milesBetween, pinFor } from "@/lib/geo";
 import { useMerchant } from "@/lib/merchant-store";
 import type { DriverPolicy, DriverProfile, Vehicle } from "@/lib/types";
@@ -42,18 +42,22 @@ const ago = (iso: string, now: number) => {
 /* Live riders                                                                 */
 /* ========================================================================== */
 
-/** Your own riders: who is online, where they are and how far from the shop, live. */
+/** Your own riders and every online platform rider: who is online, where they are and how far from the shop, live. */
 export function LiveRidersScreen() {
-  const { data, drivers, restaurant, syncedAt } = useMerchant();
+  const { data, drivers, platformRiders, restaurant, syncedAt } = useMerchant();
   const [focus, setFocus] = useState<{ key: string; lat: number; lng: number } | null>(null);
   const shop = restaurant ? pinFor(restaurant.postcode, restaurant.coords) : null;
   // Re-rendered on every refresh; the "x ago" labels follow the last sync.
   const now = syncedAt || 0;
 
   // A handful of riders: cheap to recompute on every refresh.
-  const riders = drivers
-      .map((d) => ({
+  const riders = [
+    ...drivers.map((d) => ({ d, platform: false })),
+    ...platformRiders.map((d) => ({ d, platform: true })),
+  ]
+      .map(({ d, platform }) => ({
         d,
+        platform,
         miles: d.isOnline && d.location && shop ? milesBetween(shop, d.location) : null,
       }))
       .sort((a, b) => {
@@ -102,7 +106,7 @@ export function LiveRidersScreen() {
           tone="info"
           hint={located[0]?.d.name}
         />
-        <StatTile label="Team" value={drivers.length} icon={<Users className="size-5" />} hint={`${drivers.length - online.length} offline`} />
+        <StatTile label="Team" value={drivers.length} icon={<Users className="size-5" />} hint={`${drivers.filter((d) => !d.isOnline).length} offline`} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
@@ -128,12 +132,16 @@ export function LiveRidersScreen() {
         </Card>
 
         <Card className="flex flex-col xl:max-h-[652px]">
-          <CardHeader title="Your riders" subtitle="Positions update every few seconds" />
+          <CardHeader title="Drivers" subtitle="Your team and online platform drivers · positions update every few seconds" />
           <div className="scroll-thin mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-4">
             {riders.length === 0 ? (
-              <EmptyState icon={<Users className="size-6" />} title="No drivers yet" body="Add your in-house drivers under My drivers." />
+              <EmptyState
+                icon={<Users className="size-6" />}
+                title="No drivers online"
+                body="Platform drivers appear here when they go online. Add your in-house drivers under My drivers."
+              />
             ) : (
-              riders.map(({ d, miles }) => {
+              riders.map(({ d, miles, platform }) => {
                 const busy = (d.activeOrders ?? 0) > 0;
                 const clickable = miles != null;
                 return (
@@ -153,6 +161,7 @@ export function LiveRidersScreen() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-bold text-ink">{d.name}</span>
                       <span className="block truncate text-xs text-ink-3">
+                        {platform ? "Platform · " : "Your team · "}
                         {!d.isOnline
                           ? "Offline"
                           : miles == null
@@ -351,9 +360,13 @@ const POLICIES: { value: DriverPolicy; title: string; subtitle: string; icon: Re
 ];
 
 export function DeliverySettingsScreen() {
-  const { restaurant, credits, updatePolicy } = useMerchant();
-  if (!restaurant) return <Skeleton className="h-80" />;
+  const { data, restaurant, credits, updatePolicy, updatePoolTime } = useMerchant();
+  if (!restaurant || !data) return <Skeleton className="h-80" />;
   const fee = credits?.feePerDeliveryGbp ?? 0;
+  const standardTime = data.algorithm.poolWindowSeconds;
+  const ownTime = restaurant.poolWindowSeconds ?? null;
+  const poolTime = ownTime ?? standardTime;
+  const setPoolTime = (delta: number) => updatePoolTime(Math.max(30, Math.min(1800, poolTime + delta)));
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -386,6 +399,23 @@ export function DeliverySettingsScreen() {
       </Card>
 
       <div className="space-y-6">
+        <Card className="p-6">
+          <p className="text-[12px] font-bold tracking-[0.14em] text-ink-3 uppercase">Time in the order pool</p>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <span>
+              <span className="block font-semibold text-ink">Time in pool</span>
+              <span className="block text-sm text-ink-3">
+                {ownTime == null ? "Standard time" : "Your time"} · then the order leaves the pool
+              </span>
+            </span>
+            <Stepper name="Time in pool" value={formatPoolTime(poolTime)} onDecrement={() => setPoolTime(-30)} onIncrement={() => setPoolTime(30)} />
+          </div>
+          {ownTime != null && (
+            <button onClick={() => updatePoolTime(null)} className="mt-3 text-sm font-semibold text-brand hover:underline">
+              Use the standard time ({formatPoolTime(standardTime)})
+            </button>
+          )}
+        </Card>
         <Card className="p-6">
           <p className="text-[12px] font-bold tracking-[0.14em] text-ink-3 uppercase">Billing</p>
           <div className="mt-4 divide-y divide-line">

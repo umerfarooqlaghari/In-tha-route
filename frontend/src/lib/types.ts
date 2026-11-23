@@ -120,6 +120,8 @@ export interface RestaurantPartner {
   postcode: string;
   phone: string;
   driverPolicy: DriverPolicy;
+  /** Its own time (seconds) in the pool, or null for the admin's standard time. */
+  poolWindowSeconds?: number | null;
   activeOrdersCount: number;
   completedTodayCount: number;
   pickupSafetyNote: string;
@@ -210,6 +212,16 @@ export interface ReceiptTemplate {
 }
 
 /** What `GET /api/restaurant/dashboard` returns. Change endpoints return `{ dashboard }`. */
+/** An online platform driver as a merchant's live map shows them (short name, no contact details). */
+export interface PlatformRider {
+  id: string;
+  name: string;
+  driverType: "platform_contracted";
+  isOnline: true;
+  location: (LatLng & { updatedAt: string }) | null;
+  activeOrders: number;
+}
+
 export interface MerchantDashboard {
   role: "restaurant";
   activeRestaurantId: string;
@@ -218,6 +230,8 @@ export interface MerchantDashboard {
   drivers: DriverProfile[];
   algorithm: AlgorithmConfig;
   credits?: CreditSummary;
+  /** Every online platform driver, for the live riders map. */
+  platformRiders?: PlatformRider[];
 }
 
 export interface PastOrder extends LiveOrder {
@@ -302,6 +316,8 @@ export interface AlgorithmConfig {
   offerRadiusMiles: number;
   /** On: every platform driver sees every open order, however far away. */
   noDistanceLimit: boolean;
+  /** Standard time (seconds) an order stays in the pool; a merchant may set its own. */
+  poolWindowSeconds: number;
 }
 
 export interface PricingSummary {

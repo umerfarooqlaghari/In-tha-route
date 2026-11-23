@@ -56,3 +56,11 @@ export const initials = (name: string) =>
     .join("");
 
 export const cn = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(" ");
+
+/** Pool time: "45 s", "2 min", "2 min 30 s". */
+export function formatPoolTime(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (!m) return `${s} s`;
+  return s ? `${m} min ${s} s` : `${m} min`;
+}

@@ -25,7 +25,7 @@ import {
   Stat,
   Stepper,
 } from '@/components/ui';
-import { Brand, formatGbp, sourceColor } from '@/constants/brand';
+import { Brand, formatGbp, formatPoolTime, sourceColor } from '@/constants/brand';
 import { coordsForPostcode } from '@/constants/geo';
 import { DriverPolicy, DriverProfile, KycDocument, LiveOrder, RestaurantPartner, useInThaRoute } from '@/context/InThaRouteContext';
 import { UploadedFile } from '@/components/UploadedFile';
@@ -1097,6 +1097,19 @@ function PricingScreen() {
             { value: 'none', label: 'No limit' },
           ]}
         />
+        <Divider />
+        <View style={styles.settingRow}>
+          <View style={styles.flexText}>
+            <Text style={styles.cardTitle}>Time in pool</Text>
+            <Text style={styles.muted}>Then the order leaves the pool · merchants can set their own</Text>
+          </View>
+          <Stepper
+            name="Time in pool"
+            value={formatPoolTime(algorithm.poolWindowSeconds)}
+            onDecrement={() => updateAlgorithmConfig({ poolWindowSeconds: Math.max(30, algorithm.poolWindowSeconds - 30) })}
+            onIncrement={() => updateAlgorithmConfig({ poolWindowSeconds: Math.min(1800, algorithm.poolWindowSeconds + 30) })}
+          />
+        </View>
         {!algorithm.noDistanceLimit && (
           <>
             <Divider />

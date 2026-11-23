@@ -85,6 +85,32 @@ async function listByRestaurant(restaurantId) {
   return withDocuments(rows);
 }
 
+/** "Ali Khan" → "Ali K.": enough for a merchant to tell riders apart. */
+const shortName = (fullName) => {
+  const [first, ...rest] = String(fullName || '').trim().split(/\s+/);
+  const last = rest.pop();
+  return last ? `${first} ${last[0].toUpperCase()}.` : first || 'Rider';
+};
+
+/**
+ * Every online platform driver, for a merchant's live map: a short name, where they are
+ * (null with location off) and how many orders they are carrying. No contact details.
+ */
+async function listOnlinePlatformRiders() {
+  const { rows } = await db.query(
+    `${DRIVER_SELECT} WHERE d.driver_type = 'platform_contracted' AND d.status = 'approved_online' AND u.is_active
+      ORDER BY u.full_name`
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: shortName(r.full_name),
+    driverType: 'platform_contracted',
+    isOnline: true,
+    location: freshLocation(r),
+    activeOrders: r.active_orders,
+  }));
+}
+
 async function listAll() {
   const { rows } = await db.query(`${DRIVER_SELECT} WHERE u.is_active ORDER BY d.created_at DESC`);
   return withDocuments(rows);
@@ -294,6 +320,7 @@ module.exports = {
   setOnline,
   updateLocation,
   clearLocation,
+  listOnlinePlatformRiders,
   freshLocation,
   earnings,
   history,

@@ -70,9 +70,21 @@ const addOwnDriverSchema = z.object({
   plateNumber: z.string().trim().toUpperCase().max(20, 'Plate number is too long.').optional(),
 });
 
-const policySchema = z.object({
-  driverPolicy: z.enum(DRIVER_POLICIES, { error: `Policy must be one of: ${DRIVER_POLICIES.join(', ')}.` }),
-});
+// Time an order stays in the open pool: 30 seconds to 30 minutes.
+const poolTime = z
+  .number()
+  .int('Pool time must be whole seconds.')
+  .min(30, 'Pool time must be at least 30 seconds.')
+  .max(1800, 'Pool time must be at most 30 minutes.');
+
+// Delivery settings: who delivers, and how long orders stay in the pool (null: the admin's standard time).
+const policySchema = z
+  .object({
+    driverPolicy: z.enum(DRIVER_POLICIES, { error: `Policy must be one of: ${DRIVER_POLICIES.join(', ')}.` }),
+    poolWindowSeconds: poolTime.nullable(),
+  })
+  .partial()
+  .refine((o) => Object.keys(o).length > 0, { message: 'Nothing to update.' });
 
 const availabilitySchema = z.object({ online: z.boolean({ error: 'online must be true or false.' }) });
 
@@ -92,6 +104,7 @@ const pricingSchema = z
     maxPickupRadiusMiles: z.number().min(0).max(20),
     offerRadiusMiles: z.number().min(0.5, 'Driver radius must be at least 0.5 miles.').max(20, 'Driver radius must be at most 20 miles.'),
     noDistanceLimit: z.boolean(),
+    poolWindowSeconds: poolTime,
   })
   .partial()
   .refine((o) => Object.keys(o).length > 0, { message: 'Nothing to update.' });

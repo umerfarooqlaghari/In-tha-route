@@ -100,6 +100,14 @@ export const sourceColor = (source: string) => SOURCE_COLORS[source as SourceKey
 
 export const formatGbp = (value: number) => `£${value.toFixed(2)}`;
 
+/** Pool time: "45 s", "2 min", "2 min 30 s". */
+export const formatPoolTime = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (!m) return `${s} s`;
+  return s ? `${m} min ${s} s` : `${m} min`;
+};
+
 export const formatCountdown = (seconds: number) => {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
