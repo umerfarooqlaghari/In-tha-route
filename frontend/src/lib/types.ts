@@ -300,6 +300,8 @@ export interface AlgorithmConfig {
   maxPrepTimeWindowMinutes: number;
   maxPickupRadiusMiles: number;
   offerRadiusMiles: number;
+  /** On: every platform driver sees every open order, however far away. */
+  noDistanceLimit: boolean;
 }
 
 export interface PricingSummary {

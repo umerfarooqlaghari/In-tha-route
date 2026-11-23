@@ -81,7 +81,8 @@ async function activeOrderCount(client, driverId) {
 /**
  * Whether a driver can take new pool orders now, and why not. In-house drivers only take
  * their own restaurant's hybrid orders, and need no location for that (the restaurant can
- * give them an order wherever they are, too).
+ * give them an order wherever they are, too). With the admin's "No distance limit" on,
+ * platform drivers need no location either.
  * @returns {{activeOrders: number, maxOrders: number, here: object|null,
  *            reason: null | 'offline' | 'no_location' | 'full'}}
  */
@@ -93,13 +94,19 @@ async function driverRoom(client, driver, config) {
   let reason = null;
   if (driver.status !== 'approved_online') reason = 'offline';
   else if (activeOrders >= maxOrders) reason = 'full';
-  else if (!here && !inHouse) reason = 'no_location';
+  else if (!here && !inHouse && !config.noDistanceLimit) reason = 'no_location';
   return { activeOrders, maxOrders, here, reason };
 }
 
-/** Whether a restaurant is within the driver radius (a restaurant without a map pin always is). */
-const withinReach = (here, pickup, config) =>
-  !pickup || pickup.latitude == null || geo.straightLineMiles(here, pickup) <= config.offerRadiusMiles;
+/**
+ * Whether a restaurant is within the driver radius. Always, when the admin has switched the
+ * distance limit off or the restaurant has no map pin; never for a driver with no location.
+ */
+const withinReach = (here, pickup, config) => {
+  if (config.noDistanceLimit) return true;
+  if (!here) return false;
+  return !pickup || pickup.latitude == null || geo.straightLineMiles(here, pickup) <= config.offerRadiusMiles;
+};
 
 /**
  * Pushes a new pool order to every driver who can take it right now: online, within the
@@ -139,7 +146,7 @@ async function notifyNearbyDrivers(orderId) {
     const inHouse = d.driver_type === 'restaurant_own';
     const here = freshLocation(d);
     if (d.active_orders >= config.maxBatchSize) continue;
-    if (!inHouse && (!here || !withinReach(here, order, config))) continue;
+    if (!inHouse && !withinReach(here, order, config)) continue;
     const pay = pricing.calculateOrderFinancials(
       config, Number(order.distance_miles), d.active_orders + 1, inHouse ? 'own_driver' : 'open_platform'
     ).driverPayoutGbp;

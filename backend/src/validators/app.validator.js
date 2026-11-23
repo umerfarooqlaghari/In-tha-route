@@ -91,6 +91,7 @@ const pricingSchema = z
     maxPrepTimeWindowMinutes: z.number().int().min(1).max(120),
     maxPickupRadiusMiles: z.number().min(0).max(20),
     offerRadiusMiles: z.number().min(0.5, 'Driver radius must be at least 0.5 miles.').max(20, 'Driver radius must be at most 20 miles.'),
+    noDistanceLimit: z.boolean(),
   })
   .partial()
   .refine((o) => Object.keys(o).length > 0, { message: 'Nothing to update.' });

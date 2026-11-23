@@ -172,14 +172,30 @@ export function PricingScreen() {
           <SettingRow title="Max batch" sub="Orders a driver holds at once">
             <Stepper name="Max batch" value={`${algorithm.maxBatchSize}`} onDecrement={() => setMax(-1)} onIncrement={() => setMax(1)} />
           </SettingRow>
-          <SettingRow title="Driver radius" sub="Who sees a new order">
-            <Stepper
-              name="Driver radius"
-              value={`${algorithm.offerRadiusMiles} mi`}
-              onDecrement={() => nudge("offerRadiusMiles", -0.5, 0.5, 20)}
-              onIncrement={() => nudge("offerRadiusMiles", 0.5, 0.5, 20)}
+          <SettingRow
+            title="Distance limit"
+            sub={algorithm.noDistanceLimit ? "Every driver sees every order" : "Drivers see orders within the radius"}
+          >
+            <Segmented
+              size="sm"
+              value={algorithm.noDistanceLimit ? "none" : "miles"}
+              onChange={(v) => updateAlgorithm({ noDistanceLimit: v === "none" })}
+              options={[
+                { value: "miles", label: "Miles" },
+                { value: "none", label: "No limit" },
+              ]}
             />
           </SettingRow>
+          {!algorithm.noDistanceLimit && (
+            <SettingRow title="Driver radius" sub="Who sees a new order">
+              <Stepper
+                name="Driver radius"
+                value={`${algorithm.offerRadiusMiles} mi`}
+                onDecrement={() => nudge("offerRadiusMiles", -0.5, 0.5, 20)}
+                onIncrement={() => nudge("offerRadiusMiles", 0.5, 0.5, 20)}
+              />
+            </SettingRow>
+          )}
         </Section>
 
         <Section icon={<Layers className="size-4" />} title="Driver pay per order" delay={0.15}>

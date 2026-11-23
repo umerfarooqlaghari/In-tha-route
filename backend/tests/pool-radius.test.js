@@ -115,6 +115,35 @@ test('location is off only when the driver turns it off, and back on when they t
   assert.equal(await seesOrder(orderId), true);
 });
 
+test('with "No distance limit" on, a platform driver sees the order from any distance, even with location off', async () => {
+  await pool.query(`UPDATE orders SET pool_expires_at = now() + interval '1 hour'`);
+  await setRadius(0.5);
+  const on = await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ noDistanceLimit: true });
+  assert.equal(on.status, 200, JSON.stringify(on.body));
+  for (const miles of [0.3, 8.6, 25, 150]) {
+    await moveDriver(milesSouth(miles));
+    assert.equal(await seesOrder(orderId), true, `driver ${miles} mi away`);
+  }
+  // Location off: still sees it, and can take it.
+  await request(app).delete('/api/driver/location').set(bearer(driver));
+  const view = await driverView();
+  assert.equal(view.capacity.poolBlockedBy, null);
+  assert.ok(view.orders.some((o) => o.id === orderId));
+
+  // Switching it back on uses the miles again (still 0.5).
+  await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ noDistanceLimit: false });
+  assert.equal((await driverView()).capacity.poolBlockedBy, 'no_location');
+  await moveDriver(milesSouth(8.6));
+  assert.equal(await seesOrder(orderId), false);
+  await moveDriver(milesSouth(0.3));
+  assert.equal(await seesOrder(orderId), true);
+});
+
+test('"No distance limit" must be true or false', async () => {
+  const res = await request(app).put('/api/admin/pricing').set(bearer(admin)).send({ noDistanceLimit: 'yes' });
+  assert.equal(res.status, 400);
+});
+
 test('an order whose pool time has run out is no longer shown, at any radius', async () => {
   await setRadius(20);
   await moveDriver(milesSouth(1));

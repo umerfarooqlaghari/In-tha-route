@@ -21,6 +21,7 @@ const driverPricing = (config) => ({
   maxPrepTimeWindowMinutes: config.maxPrepTimeWindowMinutes,
   maxPickupRadiusMiles: config.maxPickupRadiusMiles,
   offerRadiusMiles: config.offerRadiusMiles,
+  noDistanceLimit: config.noDistanceLimit,
 });
 
 // Typical average speeds in town, used for the "~min" estimate on an offer.

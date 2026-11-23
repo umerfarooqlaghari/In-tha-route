@@ -253,6 +253,8 @@ export interface AlgorithmConfig {
   maxPickupRadiusMiles: number;
   /** Platform drivers within this many miles of the restaurant see a new order. */
   offerRadiusMiles: number;
+  /** On: every platform driver sees every open order, however far away. */
+  noDistanceLimit: boolean;
 }
 
 /** How full a driver's run is (the admin's max orders at once applies to every driver). */
@@ -374,6 +376,7 @@ const DEFAULT_ALGORITHM: AlgorithmConfig = {
   maxPrepTimeWindowMinutes: 15,
   maxPickupRadiusMiles: 0.8,
   offerRadiusMiles: 3,
+  noDistanceLimit: false,
 };
 
 const POLL_MS = 12_000;

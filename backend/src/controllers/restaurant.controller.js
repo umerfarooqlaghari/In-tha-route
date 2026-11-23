@@ -22,6 +22,7 @@ const restaurantPricing = (config, customFeeGbp) => ({
   maxPrepTimeWindowMinutes: config.maxPrepTimeWindowMinutes,
   maxPickupRadiusMiles: config.maxPickupRadiusMiles,
   offerRadiusMiles: config.offerRadiusMiles,
+  noDistanceLimit: config.noDistanceLimit,
 });
 
 async function loadRestaurant(user) {

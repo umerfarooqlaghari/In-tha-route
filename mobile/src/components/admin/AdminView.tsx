@@ -1083,18 +1083,37 @@ function PricingScreen() {
           />
         </View>
         <Divider />
-        <View style={styles.settingRow}>
-          <View style={styles.flexText}>
-            <Text style={styles.cardTitle}>Driver radius</Text>
-            <Text style={styles.muted}>Who sees a new order</Text>
-          </View>
-          <Stepper
-            name="Driver radius"
-            value={`${algorithm.offerRadiusMiles} mi`}
-            onDecrement={() => nudge('offerRadiusMiles', -0.5, 0.5, 20)}
-            onIncrement={() => nudge('offerRadiusMiles', 0.5, 0.5, 20)}
-          />
+        <View style={styles.flexText}>
+          <Text style={styles.cardTitle}>Distance limit</Text>
+          <Text style={styles.muted}>
+            {algorithm.noDistanceLimit ? 'Every driver sees every order' : 'Drivers see orders within the radius'}
+          </Text>
         </View>
+        <Segmented
+          value={algorithm.noDistanceLimit ? 'none' : 'miles'}
+          onChange={(v) => updateAlgorithmConfig({ noDistanceLimit: v === 'none' })}
+          options={[
+            { value: 'miles', label: 'Miles' },
+            { value: 'none', label: 'No limit' },
+          ]}
+        />
+        {!algorithm.noDistanceLimit && (
+          <>
+            <Divider />
+            <View style={styles.settingRow}>
+              <View style={styles.flexText}>
+                <Text style={styles.cardTitle}>Driver radius</Text>
+                <Text style={styles.muted}>Who sees a new order</Text>
+              </View>
+              <Stepper
+                name="Driver radius"
+                value={`${algorithm.offerRadiusMiles} mi`}
+                onDecrement={() => nudge('offerRadiusMiles', -0.5, 0.5, 20)}
+                onIncrement={() => nudge('offerRadiusMiles', 0.5, 0.5, 20)}
+              />
+            </View>
+          </>
+        )}
       </Card>
 
       <SectionLabel>Pay per order in a run</SectionLabel>
