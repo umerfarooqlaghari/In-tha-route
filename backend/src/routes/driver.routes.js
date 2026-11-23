@@ -19,6 +19,7 @@ router.get('/documents/:id/file', h(c.documentFile)); // the driver's own upload
 router.put('/availability', approved, h(c.setAvailability)); // online / offline
 router.get('/history', approved, h(c.orderHistory)); // past deliveries and pay
 router.put('/location', approved, h(c.updateLocation)); // GPS position while the app is open
+router.delete('/location', approved, h(c.clearLocation)); // the driver turned location off
 router.post('/batch/accept', approved, h(c.acceptBatch));
 router.post('/batch/decline', approved, h(c.declineBatch));
 router.post('/batch/advance', approved, h(c.advanceStop)); // "Picked up" / "Delivered"

@@ -151,6 +151,12 @@ async function updateLocation(req, res) {
   res.status(204).end();
 }
 
+/** The app reports that the driver turned location off. */
+async function clearLocation(req, res) {
+  await drivers.clearLocation(req.user.driver_id);
+  res.status(204).end();
+}
+
 async function acceptBatch(req, res) {
   const orderIds = await dispatch.accept(req.user.driver_id);
   push.later(() => push.orderUpdate(orderIds, 'accepted'));
@@ -227,6 +233,7 @@ module.exports = {
   dashboard,
   setAvailability,
   updateLocation,
+  clearLocation,
   orderHistory,
   acceptBatch,
   declineBatch,

@@ -17,13 +17,12 @@ const DRIVER_SELECT = `
 
 const isApproved = (status) => status === 'approved_online' || status === 'offline';
 
-/** A position older than this is not used for dispatch or shown on the admin map. */
-const LOCATION_FRESH_MINUTES = 10;
-
-/** Last GPS fix if it is recent enough to trust, else null. */
-function freshLocation(row, now = new Date()) {
+/**
+ * The driver's last GPS fix, or null if location is off. There is no time limit: a position
+ * stays in use until the app sends a new one, or clears it when the driver turns location off.
+ */
+function freshLocation(row) {
   if (row.last_latitude == null || row.last_longitude == null || !row.last_location_at) return null;
-  if (now - new Date(row.last_location_at) > LOCATION_FRESH_MINUTES * 60000) return null;
   return {
     latitude: row.last_latitude,
     longitude: row.last_longitude,
@@ -147,6 +146,14 @@ async function updateLocation(driverId, { latitude, longitude }) {
         SET last_latitude = $1, last_longitude = $2, last_location_at = now()
       WHERE id = $3`,
     [latitude, longitude, driverId]
+  );
+}
+
+/** The driver turned location off on their phone: forget the position until they turn it back on. */
+async function clearLocation(driverId) {
+  await db.query(
+    `UPDATE driver_profiles SET last_latitude = NULL, last_longitude = NULL, last_location_at = NULL WHERE id = $1`,
+    [driverId]
   );
 }
 
@@ -286,6 +293,7 @@ module.exports = {
   createOwnDriver,
   setOnline,
   updateLocation,
+  clearLocation,
   freshLocation,
   earnings,
   history,

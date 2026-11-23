@@ -163,11 +163,11 @@ describe('two drivers going for the same order at the same moment', () => {
     assert.ok((await poolIds(d)).includes(b));
   });
 
-  test('a driver without a recent location sees no pool and cannot accept', async () => {
+  test('a driver with location off sees no pool and cannot accept', async () => {
     await clearRuns();
     const a = await poolOrder('#G3');
     const d = drivers[2];
-    await pool.query('UPDATE driver_profiles SET last_location_at = now() - interval \'1 hour\' WHERE id = $1', [d.id]);
+    await request(app).delete('/api/driver/location').set(bearer(d));
     const dash = (await request(app).get('/api/driver/dashboard').set(bearer(d))).body;
     assert.equal(dash.capacity.poolBlockedBy, 'no_location');
     const res = await request(app).post(`/api/driver/pool/${a}/add`).set(bearer(d));
