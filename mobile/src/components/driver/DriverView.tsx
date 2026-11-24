@@ -11,7 +11,6 @@ import {
   Card,
   Divider,
   EmptyState,
-  Hint,
   IconButton,
   IconTile,
   ListRow,
@@ -655,13 +654,12 @@ function OrderPoolScreen() {
 /* ========================================================================== */
 
 function EarningsScreen() {
-  const { algorithm, earnings, setActiveScreen } = useInThaRoute();
+  const { earnings, setActiveScreen } = useInThaRoute();
   // Last 7 days from the server; the last entry is today.
   const days = earnings?.week ?? [];
   const total = earnings?.totalGbp ?? 0;
   const max = Math.max(1, ...days.map((d) => d.value));
   const recentTrips = earnings?.recentTrips ?? [];
-  const ordinals = ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th'];
 
   return (
     <Screen>
@@ -696,17 +694,6 @@ function EarningsScreen() {
         <View style={styles.vDivider} />
         <Stat label="Rating" value={(earnings?.rating ?? 5).toFixed(2)} />
       </Card>
-
-      <SectionLabel>Batch pay</SectionLabel>
-      <Card>
-        {algorithm.steppedDriverPayoutsGbp.slice(0, algorithm.maxBatchSize).map((p, i) => (
-          <View key={i} style={styles.payRow}>
-            <Text style={styles.cardBody}>{ordinals[i]} order</Text>
-            <Text style={styles.cardTitle}>{formatGbp(p)}</Text>
-          </View>
-        ))}
-      </Card>
-      <Hint icon="layers-outline">More orders per run means more per hour.</Hint>
 
       <SectionLabel>Recent trips</SectionLabel>
       <Card>
