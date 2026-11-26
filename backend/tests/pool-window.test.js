@@ -125,6 +125,21 @@ describe('a driver rejecting a pool order', () => {
   });
 });
 
+describe('telling the merchant nobody took it', () => {
+  test('once for each window that runs out', async () => {
+    const orders = require('../src/services/order.service');
+    await orders.sendAttentionAlerts(); // anything left over from earlier tests
+    const o = await post(restaurant, '#N1');
+    assert.equal((await orders.sendAttentionAlerts()).poolExpired, 0, 'still in its window');
+    await expire(o.id);
+    assert.equal((await orders.sendAttentionAlerts()).poolExpired, 1);
+    assert.equal((await orders.sendAttentionAlerts()).poolExpired, 0, 'only once');
+    await request(app).post(`/api/restaurant/orders/${o.id}/find-drivers`).set(bearer(restaurant));
+    await expire(o.id);
+    assert.equal((await orders.sendAttentionAlerts()).poolExpired, 1, 'again for the new window');
+  });
+});
+
 describe('"Find drivers again" and giving the order to your own driver', () => {
   test('find again puts it back for everyone, including drivers who rejected it, with a new window', async () => {
     const o = await post(restaurant, '#F1');

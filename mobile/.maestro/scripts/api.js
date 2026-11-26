@@ -108,6 +108,14 @@ if (action === 'reset') {
   var ot = login('own@e2e.test');
   call('POST', '/api/driver/batch/advance', null, ot); // picked up
   call('POST', '/api/driver/batch/advance', null, ot); // delivered
+} else if (action === 'driverAdvance') {
+  // The driver with EMAIL taps "Picked up" / "Delivered" once.
+  call('POST', '/api/driver/batch/advance', null, login(EMAIL));
+} else if (action === 'adminCancel') {
+  // The admin cancels the order with order number REF (collected or not).
+  var orders = call('GET', '/api/admin/dashboard', null, login('admin@e2e.test')).orders;
+  var target = orders.filter(function (x) { return x.externalOrderId === REF; })[0];
+  call('POST', '/api/admin/orders/' + target.id + '/cancel', { reason: 'e2e cancel' }, login('admin@e2e.test'));
 } else if (action === 'check') {
   // Reads one value back for an assertion: PATH is a dotted path into the admin dashboard.
   var dsh = call('GET', '/api/admin/dashboard', null, login('admin@e2e.test'));

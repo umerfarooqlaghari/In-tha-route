@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const realtime = require('./realtime.service');
 
 /**
  * Push notifications through Expo's push service (it forwards to Apple APNs and
@@ -140,6 +141,7 @@ async function ownDriverAssigned(orderId) {
 async function orderUpdate(orderIds, kind) {
   const ids = [].concat(orderIds).filter(Boolean);
   if (ids.length === 0) return 0;
+  await realtime.ordersChanged(ids).catch(() => {});
   const { rows } = await db.query(
     `SELECT o.id, o.external_order_id, o.postcode, o.hybrid, r.owner_user_id, u.full_name AS driver,
             d.driver_type
@@ -216,6 +218,7 @@ async function orderRemovedFromRun(order, kind) {
 
 /** An admin cancelled a restaurant's order. */
 async function orderCancelledByAdmin(order) {
+  await realtime.ordersChanged([order.id]).catch(() => {});
   const { rows } = await db.query('SELECT owner_user_id FROM restaurants WHERE id = $1', [order.restaurant_id]);
   if (!rows[0]) return 0;
   return sendToUsers([rows[0].owner_user_id], {
@@ -225,7 +228,7 @@ async function orderCancelledByAdmin(order) {
   });
 }
 
-/** An order needs attention: nobody has taken it, or the delivery is running very late. */
+/** An order needs attention: its pool window ran out, nobody has taken it, or the delivery is very late. */
 async function attentionAlert(orderId, kind) {
   const { rows } = await db.query(
     `SELECT o.id, o.external_order_id, o.postcode, r.name AS restaurant, r.owner_user_id, u.full_name AS driver
@@ -238,6 +241,15 @@ async function attentionAlert(orderId, kind) {
   const o = rows[0];
   if (!o) return 0;
   const data = { type: 'order', orderId: o.id };
+  if (kind === 'pool_expired') {
+    // The pool window ran out: the merchant chooses what to do (the app shows the choice).
+    await realtime.ordersChanged([o.id]).catch(() => {});
+    return sendToUsers([o.owner_user_id], {
+      title: 'No drivers available',
+      body: `Nobody accepted ${ref(o)} in time. Open the app to find drivers again or give it to your own driver.`,
+      data,
+    });
+  }
   const admins = await adminUserIds();
   if (kind === 'no_driver') {
     return (

@@ -92,7 +92,7 @@ function merge(existing: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] 
 }
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
-  const { isLoggedIn, role, setActiveScreen } = useInThaRoute();
+  const { isLoggedIn, role, setActiveScreen, refreshDashboard } = useInThaRoute();
   const myRole: ChatRole | null = role === 'restaurant' || role === 'driver' ? role : null;
   const enabled = isLoggedIn && !!myRole;
 
@@ -239,13 +239,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
               : c
           )
         );
+      } else if (event.type === 'orders') {
+        // An order was taken, collected, delivered or cancelled: show it now, not at the next poll.
+        refreshDashboard();
       } else if (event.type === 'ready') {
         // Catch up on anything sent while we were disconnected.
         refreshInbox();
         if (openIdRef.current) loadLatest(openIdRef.current);
       }
     },
-    [myRole, refreshInbox, loadLatest]
+    [myRole, refreshInbox, loadLatest, refreshDashboard]
   );
 
   const handleEventRef = useRef(handleEvent);

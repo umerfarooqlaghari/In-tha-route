@@ -1,0 +1,95 @@
+# The merchant sees each step at once: "Picked up" on the live card as soon as the driver
+# collects, and the order in Past orders as soon as it is delivered or cancelled after
+# collection. An in-house driver's finished run shows no money.
+appId: host.exp.Exponent
+---
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: reset
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: acceptedOrder
+- evalScript: ${output.firstRef = output.orderRef}
+- runFlow: ../common/open-app.yaml
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: rest@e2e.test
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: live_orders
+- extendedWaitUntil:
+    visible: "Driver assigned"
+    timeout: 15000
+# The driver collects: the card says so within a few seconds (no waiting for the next poll).
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: driverAdvance
+      EMAIL: driver2@e2e.test
+- extendedWaitUntil:
+    visible: "Picked up"
+    timeout: 6000
+# Cancelled after collection: it moves to Past orders, marked Cancelled.
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: adminCancel
+      REF: ${output.firstRef}
+- runFlow:
+    file: ../common/go.yaml
+    env:
+      SCREEN: past_orders
+# The row reads as one label ("…, Cancelled 18:20 · TW10 6QN, Cancelled"), hence the pattern.
+- extendedWaitUntil:
+    visible: ".*Cancelled \\d\\d:\\d\\d · TW10 6QN.*"
+    timeout: 10000
+# A delivery while Past orders is open appears at the top straight away.
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: acceptedOrder
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: driverAdvance
+      EMAIL: driver2@e2e.test
+- runScript:
+    file: ../scripts/api.js
+    env:
+      ACTION: driverAdvance
+      EMAIL: driver2@e2e.test
+- extendedWaitUntil:
+    visible: ".*Delivered \\d\\d:\\d\\d · TW10 6QN.*"
+    timeout: 8000
+# The in-house driver finishes a run: "Batch complete" with no amount.
+- runFlow:
+    file: ../common/api.yaml
+    env:
+      ACTION: ownDriverOrder
+- runFlow:
+    file: ../common/login.yaml
+    env:
+      EMAIL: own@e2e.test
+- runFlow:
+    when:
+      visible: "Go online"
+    commands:
+      - tapOn: "Go online"
+- runFlow: ../common/allow-location.yaml
+- extendedWaitUntil:
+    visible: "Picked up"
+    timeout: 20000
+- tapOn: "Picked up"
+- extendedWaitUntil:
+    visible: "Delivered"
+    timeout: 10000
+- tapOn: "Delivered"
+- extendedWaitUntil:
+    visible: "Batch complete"
+    timeout: 10000
+- assertNotVisible: "Added to this week’s earnings"
+- assertNotVisible: "£0.00"

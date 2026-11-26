@@ -17,6 +17,7 @@ const { findById } = require('./user.service');
  *                    { type: 'message', conversationId, message }
  *                    { type: 'read', conversationId, role, readAt }
  *                    { type: 'presence', userId, online, lastSeenAt }
+ *                    { type: 'orders' }  the merchant's orders changed: reload them now
  *                    { type: 'error', code }  then close (e.g. TOKEN_EXPIRED: refresh and reconnect)
  *
  * Presence is kept in memory: fine for one server instance. Running several
@@ -152,4 +153,19 @@ function attach(server) {
   return wss;
 }
 
-module.exports = { attach, isOnline, sendTo };
+/**
+ * Tells the merchants of these orders, if their app is open, to reload straight away
+ * (an order was taken, collected, delivered, cancelled, or nobody took it in time).
+ */
+async function ordersChanged(orderIds) {
+  const ids = [].concat(orderIds).filter(Boolean);
+  if (ids.length === 0 || sockets.size === 0) return;
+  const { rows } = await db.query(
+    `SELECT DISTINCT r.owner_user_id FROM orders o JOIN restaurants r ON r.id = o.restaurant_id
+      WHERE o.id = ANY($1::uuid[])`,
+    [ids]
+  );
+  rows.forEach((r) => sendTo(r.owner_user_id, { type: 'orders' }));
+}
+
+module.exports = { attach, isOnline, sendTo, ordersChanged };

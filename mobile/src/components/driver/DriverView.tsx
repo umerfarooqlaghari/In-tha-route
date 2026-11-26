@@ -141,7 +141,10 @@ function DriveScreen() {
     myLocation,
     routeEstimate,
     orders,
+    me,
   } = useInThaRoute();
+  // A merchant's own driver is paid by the merchant, not through the app: no money is shown.
+  const inHouse = me?.driverType === 'restaurant_own';
   const { batch, stops, delivered } = useActiveBatch();
   const { busy, run } = useBusy();
   const { openForOrder } = useChat();
@@ -287,7 +290,7 @@ function DriveScreen() {
               <Text style={styles.mutedStrong}>
                 Stop {stopIndex + 1} of {stops.length}
               </Text>
-              <Text style={styles.mutedStrong}>{formatGbp(totalPay)}</Text>
+              {!inHouse && <Text style={styles.mutedStrong}>{formatGbp(totalPay)}</Text>}
             </View>
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${((stopIndex + 1) / stops.length) * 100}%` }]} />
@@ -391,10 +394,14 @@ function DriveScreen() {
               <Ionicons name="checkmark" size={30} color="#FFFFFF" />
             </View>
             <Text style={styles.sheetTitle}>Batch complete</Text>
-            <Text style={styles.payout}>
-              {formatGbp(delivered.reduce((s, o) => s + o.driverPayoutGbp, 0))}
-            </Text>
-            <Text style={styles.muted}>Added to this week’s earnings</Text>
+            {!inHouse && (
+              <>
+                <Text style={styles.payout}>
+                  {formatGbp(delivered.reduce((s, o) => s + o.driverPayoutGbp, 0))}
+                </Text>
+                <Text style={styles.muted}>Added to this week’s earnings</Text>
+              </>
+            )}
             <Button
               label="Find new orders"
               loading={busy === 'next'}

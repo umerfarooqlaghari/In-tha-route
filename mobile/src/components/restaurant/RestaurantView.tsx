@@ -615,7 +615,7 @@ const STATUS_META: Record<
   batched_offered: { label: 'Offered', tone: 'info' },
   driver_assigned: { label: 'Driver assigned', tone: 'info' },
   ready_for_pickup: { label: 'Ready', tone: 'success' },
-  picked_up: { label: 'On the way', tone: 'success' },
+  picked_up: { label: 'Picked up', tone: 'success' },
   delivered: { label: 'Delivered', tone: 'neutral' },
   cancelled: { label: 'Cancelled', tone: 'neutral' },
 };

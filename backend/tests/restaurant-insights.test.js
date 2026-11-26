@@ -93,6 +93,26 @@ describe('merchant past orders', () => {
     assert.equal(next.body.orders.length, 1);
     assert.notEqual(next.body.orders[0].id, first.body.orders[0].id);
   });
+
+  test('an order cancelled after the driver collected it is listed as cancelled; one cancelled before is not', async () => {
+    const o = await post(mine, '#H6', 'Deliveroo', [{ quantity: 1, name: 'Korma', price: 11 }], 11);
+    await pool.query(
+      `UPDATE orders SET status = 'cancelled', picked_up_at = now() - interval '5 minutes', cancelled_at = now()
+        WHERE id = $1`,
+      [o.id]
+    );
+    const res = await request(app).get('/api/restaurant/history').set(bearer(mine));
+    const top = res.body.orders[0];
+    assert.equal(top.id, o.id, 'newest first, by when it finished');
+    assert.equal(top.status, 'cancelled');
+    assert.ok(top.cancelledAt);
+    assert.equal(top.deliveredAt, null);
+    assert.ok(top.finishedLabel.startsWith('Today'));
+    assert.deepEqual(top.items, [{ quantity: 1, name: 'Korma', price: 11 }]);
+    assert.ok(!res.body.orders.some((x) => x.externalOrderId === '#H4'), 'cancelled before collection');
+    assert.equal(res.body.totals.orders, 2, 'totals count delivered orders only');
+    await pool.query('DELETE FROM orders WHERE id = $1', [o.id]); // keeps the analytics below as they were
+  });
 });
 
 describe('merchant analytics', () => {

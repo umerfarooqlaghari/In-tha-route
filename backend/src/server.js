@@ -54,7 +54,7 @@ async function start() {
     } catch (err) {
       console.error('Order alerts failed:', err.message);
     }
-  }, 30_000).unref();
+  }, 15_000).unref();
 
   // Receipt photos from scans that were never posted are removed after a day.
   const files = require('./services/file.service');

@@ -15,7 +15,7 @@ import {
 import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 
 import { ReceiptSheet } from '@/components/ReceiptSheet';
-import { Button, Card, Divider, EmptyState, SectionLabel, Segmented, Screen, SourceBadge } from '@/components/ui';
+import { Badge, Button, Card, Divider, EmptyState, SectionLabel, Segmented, Screen, SourceBadge } from '@/components/ui';
 import { Brand, formatGbp, sourceColor } from '@/constants/brand';
 import { errorMessage, LiveOrder, useInThaRoute } from '@/context/InThaRouteContext';
 import { api } from '@/services/apiClient';
@@ -131,8 +131,12 @@ function LiveDot() {
 interface PastOrder extends LiveOrder {
   createdAt: string;
   pickedUpAt: string | null;
-  deliveredAt: string;
-  deliveredLabel: string;
+  deliveredAt: string | null;
+  /** Set when the order was cancelled after the driver had collected it. */
+  cancelledAt: string | null;
+  /** When it was delivered or cancelled, and that as "Today, 18:20". */
+  finishedAt: string;
+  finishedLabel: string;
   totalMinutes: number | null;
   deliveryMinutes: number | null;
 }
@@ -184,7 +188,7 @@ export function PastOrdersScreen() {
   const groups = useMemo(() => {
     const out: { day: string; orders: PastOrder[] }[] = [];
     orders.forEach((o) => {
-      const day = o.deliveredLabel.split(',')[0];
+      const day = o.finishedLabel.split(',')[0];
       const last = out[out.length - 1];
       if (last && last.day === day) last.orders.push(o);
       else out.push({ day, orders: [o] });
@@ -219,7 +223,7 @@ export function PastOrdersScreen() {
           <EmptyState
             icon="receipt-outline"
             title="No past orders yet"
-            subtitle="Orders appear here once the driver has delivered them."
+            subtitle="Orders appear here once the driver has delivered them, or if one is cancelled after collection."
           />
         </Card>
       )}
@@ -281,6 +285,7 @@ function PastOrderRow({
   onReceipt: () => void;
 }) {
   const ownDriver = o.assignedDriverType === 'restaurant_own';
+  const cancelled = o.status === 'cancelled';
   return (
     <View>
       <Pressable
@@ -300,11 +305,15 @@ function PastOrderRow({
             {o.customerName || 'Customer'}
           </Text>
           <Text style={styles.muted} numberOfLines={1}>
-            {`Delivered ${clock(o.deliveredAt)} · ${o.postcode}`}
+            {`${cancelled ? 'Cancelled' : 'Delivered'} ${clock(o.finishedAt)} · ${o.postcode}`}
           </Text>
         </View>
         <View style={styles.rowEnd}>
-          <Text style={styles.amount}>{formatGbp(o.orderTotalGbp)}</Text>
+          {cancelled ? (
+            <Badge label="Cancelled" tone="primary" />
+          ) : (
+            <Text style={styles.amount}>{formatGbp(o.orderTotalGbp)}</Text>
+          )}
           <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={C.ink3} />
         </View>
       </Pressable>
@@ -337,7 +346,11 @@ function PastOrderRow({
             <View style={styles.timelineLine} />
             <TimelineStep label="Picked up" time={clock(o.pickedUpAt)} />
             <View style={styles.timelineLine} />
-            <TimelineStep label="Delivered" time={clock(o.deliveredAt)} done />
+            {cancelled ? (
+              <TimelineStep label="Cancelled" time={clock(o.cancelledAt)} cancelled />
+            ) : (
+              <TimelineStep label="Delivered" time={clock(o.deliveredAt)} done />
+            )}
           </View>
 
           <View style={styles.panel}>
@@ -345,8 +358,8 @@ function PastOrderRow({
             <KeyValue label="Delivery fee" value={ownDriver ? 'Your driver' : formatGbp(o.restaurantFeeGbp)} />
             <KeyValue label="Distance" value={`${o.distanceMiles} mi`} />
             <KeyValue label="Prep time" value={`${o.prepMinutes} min`} />
-            <KeyValue label="On the road" value={minutes(o.deliveryMinutes)} />
-            <KeyValue label="Posted to delivered" value={minutes(o.totalMinutes)} />
+            {!cancelled && <KeyValue label="On the road" value={minutes(o.deliveryMinutes)} />}
+            {!cancelled && <KeyValue label="Posted to delivered" value={minutes(o.totalMinutes)} />}
           </View>
 
           {o.hasReceipt && <Button label="View receipt" icon="document-text-outline" variant="secondary" onPress={onReceipt} />}
@@ -372,10 +385,22 @@ function DetailBlock({ icon, title, subtitle }: { icon: keyof typeof Ionicons.gl
   );
 }
 
-function TimelineStep({ label, time, done }: { label: string; time: string; done?: boolean }) {
+function TimelineStep({
+  label,
+  time,
+  done,
+  cancelled,
+}: {
+  label: string;
+  time: string;
+  done?: boolean;
+  cancelled?: boolean;
+}) {
   return (
     <View style={styles.timelineStep}>
-      <View style={[styles.timelineDot, done && { backgroundColor: C.success }]} />
+      <View
+        style={[styles.timelineDot, done && { backgroundColor: C.success }, cancelled && { backgroundColor: C.primary }]}
+      />
       <Text style={styles.timelineTime}>{time}</Text>
       <Text style={styles.timelineLabel}>{label}</Text>
     </View>

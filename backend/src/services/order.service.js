@@ -123,18 +123,20 @@ async function listLiveForRestaurant(restaurantId) {
   return rows.map((r) => toLiveOrder(r, { view: 'restaurant' }));
 }
 
-/** Everything still in progress plus what was delivered today (UK time). */
 /**
- * A merchant's delivered orders, newest first, with times and money.
- * `before` (ISO time of the last row shown) loads the next page.
+ * A merchant's finished orders, newest first, with times and money: every delivered order,
+ * and orders cancelled after the driver had collected them. `before` (ISO time the last row
+ * shown finished) loads the next page. The totals count delivered orders only.
  */
 async function historyForRestaurant(restaurantId, { before, limit = 30 } = {}) {
   const now = new Date();
+  const finished = `coalesce(o.delivered_at, o.cancelled_at)`;
   const [page, totals] = await Promise.all([
     db.query(
-      `${ORDER_SELECT} WHERE o.restaurant_id = $1 AND o.status = 'delivered'
-          AND ($2::timestamptz IS NULL OR o.delivered_at < $2)
-        ORDER BY o.delivered_at DESC LIMIT $3`,
+      `${ORDER_SELECT} WHERE o.restaurant_id = $1
+          AND (o.status = 'delivered' OR (o.status = 'cancelled' AND o.picked_up_at IS NOT NULL))
+          AND ($2::timestamptz IS NULL OR ${finished} < $2)
+        ORDER BY ${finished} DESC LIMIT $3`,
       [restaurantId, before || null, limit]
     ),
     db.query(
@@ -145,21 +147,27 @@ async function historyForRestaurant(restaurantId, { before, limit = 30 } = {}) {
     ),
   ]);
   const minutesBetween = (a, b) => (a && b ? Math.max(1, Math.round((new Date(b) - new Date(a)) / 60000)) : null);
-  const orders = page.rows.map((row) => ({
-    ...toLiveOrder(row, { view: 'restaurant', now }),
-    createdAt: new Date(row.created_at).toISOString(),
-    pickedUpAt: row.picked_up_at ? new Date(row.picked_up_at).toISOString() : null,
-    deliveredAt: new Date(row.delivered_at).toISOString(),
-    deliveredLabel: tripTimeLabel(row.delivered_at, now),
-    // Posted -> delivered, and collected -> delivered.
-    totalMinutes: minutesBetween(row.created_at, row.delivered_at),
-    deliveryMinutes: minutesBetween(row.picked_up_at, row.delivered_at),
-  }));
+  const orders = page.rows.map((row) => {
+    const finishedAt = row.delivered_at || row.cancelled_at;
+    return {
+      ...toLiveOrder(row, { view: 'restaurant', now }),
+      createdAt: new Date(row.created_at).toISOString(),
+      pickedUpAt: row.picked_up_at ? new Date(row.picked_up_at).toISOString() : null,
+      deliveredAt: row.delivered_at ? new Date(row.delivered_at).toISOString() : null,
+      cancelledAt: row.cancelled_at && row.status === 'cancelled' ? new Date(row.cancelled_at).toISOString() : null,
+      finishedAt: new Date(finishedAt).toISOString(),
+      finishedLabel: tripTimeLabel(finishedAt, now),
+      deliveredLabel: tripTimeLabel(finishedAt, now),
+      // Posted -> delivered, and collected -> delivered.
+      totalMinutes: minutesBetween(row.created_at, row.delivered_at),
+      deliveryMinutes: minutesBetween(row.picked_up_at, row.delivered_at),
+    };
+  });
   const t = totals.rows[0];
   return {
     orders,
     totals: { orders: t.orders, salesGbp: Number(t.sales), feesGbp: Number(t.fees) },
-    nextBefore: page.rows.length === limit ? orders[orders.length - 1].deliveredAt : null,
+    nextBefore: page.rows.length === limit ? orders[orders.length - 1].finishedAt : null,
   };
 }
 
@@ -274,7 +282,11 @@ async function locateDropoff(restaurantRow, address, postcode, config) {
   return { coords: hit, distanceMiles: miles, estimated: false };
 }
 
-/** Stops the same receipt being posted twice (a double tap, or two staff scanning it). */
+/**
+ * Stops the same receipt being posted twice (a double tap, two staff scanning it, or the
+ * receipt scanned again later). Every new order gets a new order number on its receipt,
+ * so the same app and order number means the same receipt.
+ */
 async function rejectDuplicate(client, restaurantId, input) {
   const ref = String(input.externalOrderId || '').trim();
   if (!ref) return;
@@ -513,6 +525,16 @@ async function sendAttentionAlerts() {
       RETURNING id`,
     [NO_DRIVER_ALERT_MINUTES]
   );
+  // Each pool window that ran out with nobody taking the order: the merchant is told once.
+  const poolExpired = await db.query(
+    `UPDATE orders SET pool_expiry_alerted_at = pool_expires_at
+      WHERE dispatch_type = 'open_platform' AND batch_id IS NULL
+        AND status IN ('preparing', 'ready_for_pickup') AND pool_expires_at <= now()
+        -- Only windows that ran out lately: old orders are not reported all at once after a deploy.
+        AND pool_expires_at > now() - interval '10 minutes'
+        AND pool_expiry_alerted_at IS DISTINCT FROM pool_expires_at
+      RETURNING id`
+  );
   const late = await db.query(
     `UPDATE orders SET late_alert_at = now()
       WHERE status = 'picked_up' AND late_alert_at IS NULL
@@ -520,9 +542,10 @@ async function sendAttentionAlerts() {
       RETURNING id`,
     [LATE_DELIVERY_MINUTES]
   );
+  for (const { id } of poolExpired.rows) await push.attentionAlert(id, 'pool_expired');
   for (const { id } of noDriver.rows) await push.attentionAlert(id, 'no_driver');
   for (const { id } of late.rows) await push.attentionAlert(id, 'late_delivery');
-  return { noDriver: noDriver.rowCount, late: late.rowCount };
+  return { poolExpired: poolExpired.rowCount, noDriver: noDriver.rowCount, late: late.rowCount };
 }
 
 module.exports = {
