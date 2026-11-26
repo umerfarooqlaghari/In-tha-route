@@ -21,6 +21,7 @@ const restaurantPricing = (config, customFeeGbp) => ({
   steppedDriverPayoutsGbp: [],
   maxPrepTimeWindowMinutes: config.maxPrepTimeWindowMinutes,
   maxPickupRadiusMiles: config.maxPickupRadiusMiles,
+  maxDropoffRadiusMiles: config.maxDropoffRadiusMiles,
   offerRadiusMiles: config.offerRadiusMiles,
   noDistanceLimit: config.noDistanceLimit,
   // The admin's standard pool time; the merchant's own (if set) is on its partner record.

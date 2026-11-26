@@ -489,8 +489,10 @@ function SearchingRow({ poolCount }: { poolCount: number }) {
 /* ========================================================================== */
 
 function OrderPoolScreen() {
-  const { orders, algorithm, appendOrderToDriverBatch, rejectPoolOrder, setActiveScreen, myLocation, capacity, me } =
-    useInThaRoute();
+  const {
+    orders, algorithm, appendOrderToDriverBatch, rejectPoolOrder, acceptPoolGroup, rejectPoolGroup,
+    setActiveScreen, myLocation, capacity, me,
+  } = useInThaRoute();
   // In-house drivers see their own restaurant's hybrid orders here, with no platform pay.
   const inHouse = me?.driverType === 'restaurant_own';
   const { busy, run } = useBusy();
@@ -523,12 +525,22 @@ function OrderPoolScreen() {
     })),
   ];
 
-  const add = (id: string) =>
-    run(id, async () => {
-      const res = await appendOrderToDriverBatch(id);
-      setToast(res);
-      setTimeout(() => setToast(null), 2500);
-    });
+  const showToast = (res: { ok: boolean; message: string }) => {
+    setToast(res);
+    setTimeout(() => setToast(null), 2500);
+  };
+  const add = (id: string) => run(id, async () => showToast(await appendOrderToDriverBatch(id)));
+  const addGroup = (key: string, ids: string[]) => run(key, async () => showToast(await acceptPoolGroup(ids)));
+
+  // Orders that fit one run together (ready close together, delivered near each other) come
+  // from the server as a double or triple delivery, listed next to each other.
+  const entries: { key: string; orders: LiveOrder[] }[] = [];
+  for (const o of pool) {
+    const last = entries[entries.length - 1];
+    if (o.poolGroupId && last && last.key === o.poolGroupId) last.orders.push(o);
+    else entries.push({ key: o.poolGroupId ?? o.id, orders: [o] });
+  }
+  const numberOf = (o: LiveOrder) => pool.indexOf(o) + 1;
 
   return (
     <Screen>
@@ -574,7 +586,24 @@ function OrderPoolScreen() {
           <Button label="Back to map" variant="secondary" onPress={() => setActiveScreen('live_route')} />
         </Card>
       ) : (
-        pool.map((o, i) => {
+        entries.map(({ key, orders: group }) => {
+          if (group.length > 1) {
+            return (
+              <PoolGroupCard
+                key={key}
+                orders={group}
+                numberOf={numberOf}
+                inHouse={inHouse}
+                busy={busy}
+                full={activeOrders + group.length > maxOrders}
+                onReject={() => run(`reject-${key}`, () => rejectPoolGroup(group.map((g) => g.id)))}
+                onAccept={() => addGroup(key, group.map((g) => g.id))}
+                busyKey={key}
+              />
+            );
+          }
+          const o = group[0];
+          const i = numberOf(o) - 1;
           // Worked out by the server for the position this order would take in your run.
           const pay = o.nextPayoutGbp ?? o.driverPayoutGbp;
           return (
@@ -646,6 +675,100 @@ function OrderPoolScreen() {
         })
       )}
     </Screen>
+  );
+}
+
+const GROUP_NAMES: Record<number, string> = { 2: 'Double delivery', 3: 'Triple delivery' };
+
+/** A double or triple delivery: orders that fit one run together, accepted in one go. */
+function PoolGroupCard({
+  orders: group, numberOf, inHouse, busy, busyKey, full, onAccept, onReject,
+}: {
+  orders: LiveOrder[];
+  numberOf: (o: LiveOrder) => number;
+  inHouse: boolean;
+  busy: string | null;
+  busyKey: string;
+  full: boolean;
+  onAccept: () => void;
+  onReject: () => void;
+}) {
+  const pay = group.reduce((sum, o) => sum + (o.nextPayoutGbp ?? o.driverPayoutGbp), 0);
+  const kitchens = [...new Set(group.map((o) => o.restaurantName))];
+  const secondsLeft = Math.min(...group.map((o) => o.poolSecondsLeft ?? Infinity));
+  const nearest = group
+    .map((o) => o.pickupMilesAway)
+    .filter((m): m is number => m != null)
+    .sort((a, b) => a - b)[0];
+  const tripMiles = +group.reduce((sum, o) => sum + o.distanceMiles, 0).toFixed(1);
+  return (
+    <Card style={styles.groupCard}>
+      <View style={styles.rowBetween}>
+        <Badge label={GROUP_NAMES[group.length] ?? `${group.length} orders together`} tone="primary" icon="layers" />
+        {inHouse ? <Badge label="Your merchant" tone="info" /> : <Text style={styles.earn}>+{formatGbp(pay)}</Text>}
+      </View>
+      <Text style={styles.cardTitle} numberOfLines={1}>
+        {kitchens.join(' & ')}
+      </Text>
+      {secondsLeft !== Infinity && (
+        <View style={styles.rowGapShrink}>
+          <Ionicons name="timer-outline" size={16} color={secondsLeft <= 30 ? C.primary : C.ink3} />
+          <Text style={[styles.poolTimer, secondsLeft <= 30 && styles.poolTimerLow]} numberOfLines={1}>
+            {`Leaves the pool in ${formatCountdown(secondsLeft)}`}
+          </Text>
+        </View>
+      )}
+      <Divider />
+      {group.map((o) => (
+        <View key={o.id} style={styles.groupRow}>
+          <View style={styles.indexDot}>
+            <Text style={styles.indexText}>{numberOf(o)}</Text>
+          </View>
+          <View style={styles.flexText}>
+            <Text style={styles.groupRowTitle} numberOfLines={1}>
+              To {shortArea(o.deliveryAddress)} · {o.postcode}
+            </Text>
+            <Text style={styles.muted} numberOfLines={1}>
+              {kitchens.length > 1 ? `${o.restaurantName} · ` : ''}
+              {o.distanceMiles} mi · {o.remainingSeconds > 0 ? `Ready ${formatCountdown(o.remainingSeconds)}` : 'Ready'}
+            </Text>
+          </View>
+          <SourceBadge source={o.source} />
+        </View>
+      ))}
+      <Divider />
+      <View style={styles.gap2}>
+        {nearest != null && (
+          <Text style={styles.poolMeta} numberOfLines={1}>
+            {formatMilesAway(nearest)} from you
+          </Text>
+        )}
+        <Text style={nearest != null ? styles.muted : styles.poolMeta} numberOfLines={1}>
+          {tripMiles} mi of delivery trips
+        </Text>
+      </View>
+      <View style={styles.poolActions}>
+        <Button
+          label="Reject"
+          icon="close"
+          variant="secondary"
+          compact
+          loading={busy === `reject-${busyKey}`}
+          disabled={!!busy}
+          onPress={onReject}
+          style={styles.poolAction}
+        />
+        <Button
+          label={`Accept ${group.length}`}
+          icon="checkmark"
+          compact
+          loading={busy === busyKey}
+          disabled={full || !!busy}
+          onPress={onAccept}
+          style={styles.poolAction}
+        />
+      </View>
+    </Card>
   );
 }
 
@@ -1162,6 +1285,9 @@ const styles = StyleSheet.create({
   poolTimer: { ...Brand.type.captionStrong, color: C.ink3, fontVariant: ['tabular-nums'] },
   poolTimerLow: { color: C.primary },
   poolActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  groupCard: { borderWidth: 1.5, borderColor: C.primary },
+  groupRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  groupRowTitle: { fontSize: 15, fontWeight: '600', color: C.ink },
   poolAction: { flex: 1 },
   poolMeta: { fontSize: 17, fontWeight: '600', color: C.ink, flexShrink: 1, fontVariant: ['tabular-nums'] },
   earn: { ...Brand.type.heading, color: C.success },

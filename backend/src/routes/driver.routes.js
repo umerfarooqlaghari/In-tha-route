@@ -25,6 +25,8 @@ router.post('/batch/decline', approved, h(c.declineBatch));
 router.post('/batch/advance', approved, h(c.advanceStop)); // "Picked up" / "Delivered"
 router.post('/batch/next', approved, h(c.nextBatch)); // "Find new orders" / "Refresh"
 router.post('/pool/:id/add', approved, h(c.addPoolOrder)); // add a pool order to my route
+router.post('/pool-group/add', approved, h(c.addPoolGroup)); // take a double or triple delivery in one go
+router.post('/pool-group/reject', approved, h(c.rejectPoolGroup)); // remove a double or triple from my pool only
 router.post('/pool/:id/reject', approved, h(c.rejectPoolOrder)); // remove a pool order from my pool only
 router.get('/orders/:id/receipt', approved, h(c.orderReceipt)); // receipt photo of an order in my run
 

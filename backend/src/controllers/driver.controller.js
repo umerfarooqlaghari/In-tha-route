@@ -20,6 +20,7 @@ const driverPricing = (config) => ({
   steppedDriverPayoutsGbp: config.steppedDriverPayoutsGbp,
   maxPrepTimeWindowMinutes: config.maxPrepTimeWindowMinutes,
   maxPickupRadiusMiles: config.maxPickupRadiusMiles,
+  maxDropoffRadiusMiles: config.maxDropoffRadiusMiles,
   offerRadiusMiles: config.offerRadiusMiles,
   noDistanceLimit: config.noDistanceLimit,
 });
@@ -192,6 +193,21 @@ async function addPoolOrder(req, res) {
   res.json({ ...result, dashboard: await buildDashboard(req.user) });
 }
 
+/** "Accept" on a double or triple delivery: every order joins the run in one go. */
+async function addPoolGroup(req, res) {
+  const { orderIds } = parse(v.poolGroupSchema, req.body);
+  const { orderIds: added, accepted, ...result } = await dispatch.appendPoolOrders(req.user.driver_id, orderIds);
+  if (added.length && accepted) push.later(() => push.orderUpdate(added, 'accepted'));
+  res.json({ ...result, dashboard: await buildDashboard(req.user) });
+}
+
+/** "Reject" on a double or triple delivery: its orders leave this driver's pool only. */
+async function rejectPoolGroup(req, res) {
+  const { orderIds } = parse(v.poolGroupSchema, req.body);
+  await dispatch.rejectPoolOrders(req.user.driver_id, orderIds);
+  res.json({ dashboard: await buildDashboard(req.user) });
+}
+
 /** "Reject": the order disappears from this driver's pool only. */
 async function rejectPoolOrder(req, res) {
   await dispatch.rejectPoolOrder(req.user.driver_id, parse(v.uuidSchema, req.params.id));
@@ -241,6 +257,8 @@ module.exports = {
   advanceStop,
   nextBatch,
   addPoolOrder,
+  addPoolGroup,
+  rejectPoolGroup,
   rejectPoolOrder,
   orderReceipt,
   uploadDocument,

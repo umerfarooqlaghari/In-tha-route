@@ -123,6 +123,10 @@ export interface LiveOrder {
   platformMarginGbp?: number;
   /** Order pool only: what this order would pay the driver if added now. */
   nextPayoutGbp?: number;
+  /** Order pool only: orders that fit one run together share this id (a double or triple delivery). */
+  poolGroupId?: string;
+  /** Order pool only: how many orders are in its double or triple delivery. */
+  poolGroupSize?: number;
   /** In the pool: seconds left before it leaves the pool (0: nobody took it in time). Counts down locally. */
   poolSecondsLeft?: number;
   /** Which pool window this is; it changes each time the order goes back into the pool. */
@@ -261,6 +265,8 @@ export interface AlgorithmConfig {
   steppedDriverPayoutsGbp: number[];
   maxPrepTimeWindowMinutes: number;
   maxPickupRadiusMiles: number;
+  /** Pool orders delivered within this many miles of each other can be shown as one double or triple. */
+  maxDropoffRadiusMiles: number;
   /** Platform drivers within this many miles of the restaurant see a new order. */
   offerRadiusMiles: number;
   /** On: every platform driver sees every open order, however far away. */
@@ -399,6 +405,7 @@ const DEFAULT_ALGORITHM: AlgorithmConfig = {
   steppedDriverPayoutsGbp: [4.0, 3.2, 2.8, 2.5, 2.2, 2.0, 1.9, 1.8],
   maxPrepTimeWindowMinutes: 15,
   maxPickupRadiusMiles: 0.8,
+  maxDropoffRadiusMiles: 1.5,
   offerRadiusMiles: 3,
   noDistanceLimit: false,
   poolWindowSeconds: 120,
@@ -485,6 +492,10 @@ interface InThaRouteContextType {
   appendOrderToDriverBatch: (orderId: string) => Promise<{ ok: boolean; message: string }>;
   /** Driver: remove a pool order from my pool only. */
   rejectPoolOrder: (orderId: string) => Promise<boolean>;
+  /** Driver: take a double or triple delivery from the pool in one go. */
+  acceptPoolGroup: (orderIds: string[]) => Promise<{ ok: boolean; message: string }>;
+  /** Driver: remove a double or triple delivery from my pool only. */
+  rejectPoolGroup: (orderIds: string[]) => Promise<boolean>;
   uploadDriverKycDoc: (docId: string, image: PickedImage) => Promise<boolean>;
 
   // Restaurant
@@ -834,6 +845,22 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
 
   const rejectPoolOrder = (orderId: string) => attempt(() => call('POST', `/api/driver/pool/${orderId}/reject`));
 
+  const acceptPoolGroup = async (orderIds: string[]) => {
+    try {
+      const res = await call<{ ok: boolean; message: string; dashboard: Dashboard }>(
+        'POST',
+        '/api/driver/pool-group/add',
+        { orderIds }
+      );
+      return { ok: res.ok, message: res.message };
+    } catch (err) {
+      return { ok: false, message: errorMessage(err) };
+    }
+  };
+
+  const rejectPoolGroup = (orderIds: string[]) =>
+    attempt(() => call('POST', '/api/driver/pool-group/reject', { orderIds }));
+
   const uploadDriverKycDoc = (docId: string, image: PickedImage) =>
     attempt(() =>
       call('POST', `/api/driver/documents/${docId}/upload`, {
@@ -1060,6 +1087,8 @@ export function InThaRouteProvider({ children }: { children: React.ReactNode }) 
         findNewOrders,
         appendOrderToDriverBatch,
         rejectPoolOrder,
+        acceptPoolGroup,
+        rejectPoolGroup,
         findDriversAgain,
         assignOrderToOwnDriver,
         uploadDriverKycDoc,

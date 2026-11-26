@@ -102,6 +102,7 @@ const pricingSchema = z
       .max(8),
     maxPrepTimeWindowMinutes: z.number().int().min(1).max(120),
     maxPickupRadiusMiles: z.number().min(0).max(20),
+    maxDropoffRadiusMiles: z.number().min(0).max(20),
     offerRadiusMiles: z.number().min(0.5, 'Driver radius must be at least 0.5 miles.').max(20, 'Driver radius must be at most 20 miles.'),
     noDistanceLimit: z.boolean(),
     poolWindowSeconds: poolTime,
@@ -126,6 +127,8 @@ const analyticsSchema = z.object({
 const rejectSchema = z.object({ reason: z.string().trim().max(300).optional() });
 const cancelSchema = z.object({ reason: z.string().trim().max(300).default('') });
 const uuidSchema = z.uuid('Invalid id.');
+// A double or triple delivery from the pool, taken or removed in one go.
+const poolGroupSchema = z.object({ orderIds: z.array(z.uuid('Invalid id.')).min(1).max(8) });
 const assignDriverSchema = z.object({ ownDriverId: z.uuid('Choose one of your drivers.') });
 
 // Credits (1 credit = £1).
@@ -177,6 +180,7 @@ module.exports = {
   cancelSchema,
   uuidSchema,
   assignDriverSchema,
+  poolGroupSchema,
   buyCreditsSchema,
   confirmCheckoutSchema,
   adjustCreditsSchema,

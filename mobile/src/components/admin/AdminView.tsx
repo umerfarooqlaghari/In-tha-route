@@ -957,7 +957,11 @@ function PricingScreen() {
       baseRestaurantChargeGbp: Math.max(2.5, Math.min(12, +(algorithm.baseRestaurantChargeGbp + delta).toFixed(2))),
     });
   // Keeps a setting inside the limits the server accepts, rounded to pennies / tenths.
-  const nudge = (key: 'baseDistanceMiles' | 'extraMileRestaurantChargeGbp' | 'extraMileDriverPayoutGbp' | 'offerRadiusMiles', delta: number, min: number, max: number) =>
+  const nudge = (
+    key:
+      | 'baseDistanceMiles' | 'extraMileRestaurantChargeGbp' | 'extraMileDriverPayoutGbp' | 'offerRadiusMiles'
+      | 'maxPrepTimeWindowMinutes' | 'maxPickupRadiusMiles' | 'maxDropoffRadiusMiles',
+    delta: number, min: number, max: number) =>
     updateAlgorithmConfig({ [key]: Math.max(min, Math.min(max, +(algorithm[key] + delta).toFixed(2))) });
   const setMax = (delta: number) => {
     const next = Math.max(1, Math.min(8, algorithm.maxBatchSize + delta));
@@ -1127,6 +1131,51 @@ function PricingScreen() {
             </View>
           </>
         )}
+      </Card>
+
+      <SectionLabel>Double & triple deliveries</SectionLabel>
+      <Card>
+        <Text style={styles.muted}>
+          Pool orders that match all three are shown to drivers as one double or triple delivery.
+        </Text>
+        <View style={styles.settingRow}>
+          <View style={styles.flexText}>
+            <Text style={styles.cardTitle}>Ready within</Text>
+            <Text style={styles.muted}>Of each other</Text>
+          </View>
+          <Stepper
+            name="Ready within"
+            value={`${algorithm.maxPrepTimeWindowMinutes} min`}
+            onDecrement={() => nudge('maxPrepTimeWindowMinutes', -1, 1, 120)}
+            onIncrement={() => nudge('maxPrepTimeWindowMinutes', 1, 1, 120)}
+          />
+        </View>
+        <Divider />
+        <View style={styles.settingRow}>
+          <View style={styles.flexText}>
+            <Text style={styles.cardTitle}>Pickups within</Text>
+            <Text style={styles.muted}>Same or nearby merchants</Text>
+          </View>
+          <Stepper
+            name="Pickups within"
+            value={`${algorithm.maxPickupRadiusMiles} mi`}
+            onDecrement={() => nudge('maxPickupRadiusMiles', -0.1, 0, 20)}
+            onIncrement={() => nudge('maxPickupRadiusMiles', 0.1, 0, 20)}
+          />
+        </View>
+        <Divider />
+        <View style={styles.settingRow}>
+          <View style={styles.flexText}>
+            <Text style={styles.cardTitle}>Drop-offs within</Text>
+            <Text style={styles.muted}>Customers near each other</Text>
+          </View>
+          <Stepper
+            name="Drop-offs within"
+            value={`${algorithm.maxDropoffRadiusMiles} mi`}
+            onDecrement={() => nudge('maxDropoffRadiusMiles', -0.5, 0, 20)}
+            onIncrement={() => nudge('maxDropoffRadiusMiles', 0.5, 0, 20)}
+          />
+        </View>
       </Card>
 
       <SectionLabel>Pay per order in a run</SectionLabel>

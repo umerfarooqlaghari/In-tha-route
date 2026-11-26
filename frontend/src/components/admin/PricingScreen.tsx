@@ -9,7 +9,9 @@ import { useAdmin } from "@/lib/admin-store";
 import { formatGbp, formatPoolTime, ORDINALS } from "@/lib/format";
 import type { AlgorithmConfig } from "@/lib/types";
 
-type NudgeKey = "baseDistanceMiles" | "extraMileRestaurantChargeGbp" | "extraMileDriverPayoutGbp" | "offerRadiusMiles";
+type NudgeKey =
+  | "baseDistanceMiles" | "extraMileRestaurantChargeGbp" | "extraMileDriverPayoutGbp" | "offerRadiusMiles"
+  | "maxPrepTimeWindowMinutes" | "maxPickupRadiusMiles" | "maxDropoffRadiusMiles";
 
 /** Same settings, steps and limits as the app's Pricing screen. */
 export function PricingScreen() {
@@ -204,6 +206,33 @@ export function PricingScreen() {
               />
             </SettingRow>
           )}
+        </Section>
+
+        <Section icon={<Layers className="size-4" />} title="Double & triple deliveries" delay={0.12}>
+          <SettingRow title="Ready within" sub="Pool orders ready this close together can be grouped">
+            <Stepper
+              name="Ready within"
+              value={`${algorithm.maxPrepTimeWindowMinutes} min`}
+              onDecrement={() => nudge("maxPrepTimeWindowMinutes", -1, 1, 120)}
+              onIncrement={() => nudge("maxPrepTimeWindowMinutes", 1, 1, 120)}
+            />
+          </SettingRow>
+          <SettingRow title="Pickups within" sub="Same or nearby merchants">
+            <Stepper
+              name="Pickups within"
+              value={`${algorithm.maxPickupRadiusMiles} mi`}
+              onDecrement={() => nudge("maxPickupRadiusMiles", -0.1, 0, 20)}
+              onIncrement={() => nudge("maxPickupRadiusMiles", 0.1, 0, 20)}
+            />
+          </SettingRow>
+          <SettingRow title="Drop-offs within" sub="Customers near each other">
+            <Stepper
+              name="Drop-offs within"
+              value={`${algorithm.maxDropoffRadiusMiles} mi`}
+              onDecrement={() => nudge("maxDropoffRadiusMiles", -0.5, 0, 20)}
+              onIncrement={() => nudge("maxDropoffRadiusMiles", 0.5, 0, 20)}
+            />
+          </SettingRow>
         </Section>
 
         <Section icon={<Layers className="size-4" />} title="Driver pay per order" delay={0.15}>

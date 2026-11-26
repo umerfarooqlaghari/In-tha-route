@@ -313,6 +313,8 @@ export interface AlgorithmConfig {
   steppedDriverPayoutsGbp: number[];
   maxPrepTimeWindowMinutes: number;
   maxPickupRadiusMiles: number;
+  /** Pool orders delivered within this many miles of each other can be one double or triple. */
+  maxDropoffRadiusMiles: number;
   offerRadiusMiles: number;
   /** On: every platform driver sees every open order, however far away. */
   noDistanceLimit: boolean;

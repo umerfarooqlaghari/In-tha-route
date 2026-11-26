@@ -13,6 +13,7 @@ function toConfig(row) {
     steppedDriverPayoutsGbp: row.stepped_driver_payouts_gbp.map(Number),
     maxPrepTimeWindowMinutes: row.max_prep_time_window_minutes,
     maxPickupRadiusMiles: Number(row.max_pickup_radius_miles),
+    maxDropoffRadiusMiles: Number(row.max_dropoff_radius_miles),
     offerRadiusMiles: Number(row.offer_radius_miles),
     noDistanceLimit: row.no_distance_limit === true,
     poolWindowSeconds: row.pool_window_seconds,
@@ -136,6 +137,7 @@ async function updateConfig(partial, userId) {
          max_batch_size = $5, stepped_driver_payouts_gbp = $6,
          max_prep_time_window_minutes = $7, max_pickup_radius_miles = $8,
          offer_radius_miles = $10, no_distance_limit = $11, pool_window_seconds = $12,
+         max_dropoff_radius_miles = $13,
          updated_by = $9, updated_at = now()
        WHERE id = 1`,
       [
@@ -151,6 +153,7 @@ async function updateConfig(partial, userId) {
         next.offerRadiusMiles,
         next.noDistanceLimit,
         next.poolWindowSeconds,
+        next.maxDropoffRadiusMiles,
       ]
     );
     // Orders in the pool now follow the new standard time straight away.

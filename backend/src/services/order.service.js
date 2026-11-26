@@ -212,23 +212,45 @@ async function listPool(driverRow, config) {
       ORDER BY o.ready_at ASC LIMIT 100`,
     [driverRow.id, dispatch.REOFFER_AFTER_MINUTES, inHouse ? driverRow.employer_restaurant_id : null]
   );
-  const orders = rows
+  const visible = rows
     .filter((r) =>
       inHouse || dispatch.withinReach(room.here, coordsOf(r.pickup_latitude, r.pickup_longitude), config)
     )
-    .slice(0, 50)
-    .map((r) => ({
+    .slice(0, 50);
+  // Orders that fit one run together are shown next to each other as a double or triple
+  // delivery, each priced at the place it would take in the driver's run.
+  const groups = dispatch.groupPoolOrders(visible, config, room.maxOrders - room.activeOrders);
+  const groupOf = new Map();
+  for (const ids of groups) ids.forEach((id, i) => groupOf.set(id, { ids, place: i }));
+  const byId = new Map(visible.map((r) => [r.id, r]));
+  const listed = [];
+  const shown = new Set();
+  for (const r of visible) {
+    if (shown.has(r.id)) continue;
+    const g = groupOf.get(r.id);
+    for (const id of g ? g.ids : [r.id]) {
+      shown.add(id);
+      listed.push(byId.get(id));
+    }
+  }
+  const orders = listed.map((r) => {
+    const g = groupOf.get(r.id);
+    return {
       ...toLiveOrder(r, {
         view: 'pool',
         nextPayoutGbp: pricing.calculateOrderFinancials(
           config,
           Number(r.distance_miles),
-          room.activeOrders + 1,
+          room.activeOrders + 1 + (g ? g.place : 0),
           inHouse ? 'own_driver' : 'open_platform'
         ).driverPayoutGbp,
       }),
       pickupMilesAway: milesFrom(room.here, coordsOf(r.pickup_latitude, r.pickup_longitude)),
-    }));
+      // Same id on every order of a double or triple delivery (its first order's id).
+      poolGroupId: g ? g.ids[0] : undefined,
+      poolGroupSize: g ? g.ids.length : undefined,
+    };
+  });
   return { orders, room };
 }
 

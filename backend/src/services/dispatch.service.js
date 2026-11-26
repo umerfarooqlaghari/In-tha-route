@@ -104,6 +104,55 @@ const withinReach = (here, pickup, config) => {
   return !pickup || pickup.latitude == null || geo.straightLineMiles(here, pickup) <= config.offerRadiusMiles;
 };
 
+/**
+ * Groups pool orders one driver could do in a single run, shown as a double or triple delivery:
+ *  - ready within the admin's prep-time window of each other,
+ *  - collected from the same restaurant, or restaurants within the pickup radius, and
+ *  - delivered within the drop-off radius of each other.
+ * Every pair in a group meets all three, so a group never drifts apart. A group holds at most
+ * `room` orders (the places left in the driver's run). Orders with no drop-off pin stay single.
+ * @param {object[]} rows pool rows, soonest ready first, with pickup_/dropoff_ latitude/longitude
+ * @returns {string[][]} groups of two or more order ids, each soonest ready first
+ */
+function groupPoolOrders(rows, config, room) {
+  if (room < 2) return [];
+  const windowMs = config.maxPrepTimeWindowMinutes * 60000;
+  const at = (lat, lng) => (lat != null && lng != null ? { latitude: Number(lat), longitude: Number(lng) } : null);
+  const dropoff = (r) => at(r.dropoff_latitude, r.dropoff_longitude);
+  const fits = (a, b) => {
+    if (Math.abs(new Date(a.ready_at) - new Date(b.ready_at)) > windowMs) return false;
+    if (a.restaurant_id !== b.restaurant_id) {
+      const p = at(a.pickup_latitude, a.pickup_longitude);
+      const q = at(b.pickup_latitude, b.pickup_longitude);
+      if (!p || !q || geo.straightLineMiles(p, q) > config.maxPickupRadiusMiles) return false;
+    }
+    const d = dropoff(a);
+    const e = dropoff(b);
+    return Boolean(d && e) && geo.straightLineMiles(d, e) <= config.maxDropoffRadiusMiles;
+  };
+  const used = new Set();
+  const groups = [];
+  for (const seed of rows) {
+    if (used.has(seed.id)) continue;
+    // The closest drop-offs to the first order join first.
+    const near = rows
+      .filter((r) => r.id !== seed.id && !used.has(r.id) && fits(seed, r))
+      .map((r) => ({ r, miles: geo.straightLineMiles(dropoff(seed), dropoff(r)) }))
+      .sort((x, y) => x.miles - y.miles)
+      .map((x) => x.r);
+    const group = [seed];
+    for (const c of near) {
+      if (group.length >= room) break;
+      if (group.every((m) => fits(m, c))) group.push(c);
+    }
+    if (group.length < 2) continue;
+    group.sort((a, b) => new Date(a.ready_at) - new Date(b.ready_at));
+    group.forEach((m) => used.add(m.id));
+    groups.push(group.map((m) => m.id));
+  }
+  return groups;
+}
+
 // A new pool order rings a driver's phone this many times, this far apart (about 10 seconds),
 // unless it is taken, removed or leaves the pool in between.
 const NEW_ORDER_RINGS = 3;
@@ -368,94 +417,149 @@ async function fileDeliveredOrders(client, batch, count) {
 async function appendPoolOrder(driverId, orderId) {
   return db.withTransaction(async (client) => {
     const driver = await lockDriver(client, driverId);
-    const inHouse = driver.driver_type === 'restaurant_own';
     if (!isApproved(driver.status)) {
       throw new AppError(403, 'DRIVER_NOT_APPROVED', 'Only approved drivers can take pool orders.');
     }
-    const config = await pricing.getConfig(client);
-    const room = await driverRoom(client, driver, config);
-    if (room.reason === 'offline') return { ok: false, message: 'Go online to take orders.' };
-    if (room.reason === 'full') {
-      return {
-        ok: false,
-        message: `You already have ${room.activeOrders} of ${room.maxOrders} orders. Deliver one to take another.`,
-      };
-    }
-    if (room.reason === 'no_location') {
-      return { ok: false, message: 'Turn on location so we can match you with orders near you.' };
-    }
+    return takeFromPool(client, driver, await pricing.getConfig(client), orderId);
+  });
+}
 
-    // If another driver is taking the same order this waits for them to finish, then checks
-    // again: the first to commit gets it, the other is told it has been taken.
-    const { rows } = await client.query(
-      `SELECT o.id, o.distance_miles, o.hybrid, o.restaurant_id, r.latitude, r.longitude
-         FROM orders o JOIN restaurants r ON r.id = o.restaurant_id
-        WHERE o.id = $1 AND o.batch_id IS NULL AND o.dispatch_type = 'open_platform'
-          AND o.status IN ('preparing', 'ready_for_pickup')
-          AND (o.pool_expires_at IS NULL OR o.pool_expires_at > now())
-        FOR UPDATE OF o`,
+/**
+ * A driver accepts a double or triple delivery from the pool in one go. The orders join the
+ * driver's run one after another, soonest ready first, exactly as if each were accepted on its
+ * own, so the run can still grow afterwards. Any order another driver took a moment earlier is
+ * skipped and the rest are still added.
+ * @returns {{ok: boolean, message: string, orderIds: string[], accepted: boolean}}
+ */
+async function appendPoolOrders(driverId, orderIds) {
+  return db.withTransaction(async (client) => {
+    const driver = await lockDriver(client, driverId);
+    if (!isApproved(driver.status)) {
+      throw new AppError(403, 'DRIVER_NOT_APPROVED', 'Only approved drivers can take pool orders.');
+    }
+    const ids = [...new Set(orderIds)];
+    // Lock every order first, in id order, so two drivers taking overlapping groups never
+    // wait on each other in a circle.
+    await client.query('SELECT id FROM orders WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE', [ids]);
+    const { rows: inOrder } = await client.query(
+      'SELECT id FROM orders WHERE id = ANY($1::uuid[]) ORDER BY ready_at ASC, created_at ASC',
+      [ids]
+    );
+    const config = await pricing.getConfig(client);
+    const before = await activeOrderCount(client, driverId);
+    const added = [];
+    let firstRefusal = null;
+    let accepted = false;
+    for (const { id } of inOrder) {
+      const res = await takeFromPool(client, driver, config, id);
+      if (res.ok) {
+        added.push(res.orderId);
+        accepted = accepted || res.accepted;
+      } else {
+        firstRefusal = firstRefusal || res.message;
+      }
+    }
+    let message;
+    if (added.length === 0) message = firstRefusal || 'Those orders have just been taken.';
+    else if (added.length < ids.length) {
+      message = `${added.length} of ${ids.length} orders added. ${firstRefusal || 'The others were just taken.'}`;
+    } else if (before === 0) message = `${added.length} orders accepted. Head to the merchant.`;
+    else message = `${added.length} orders added to your run.`;
+    return { ok: added.length > 0, message, orderIds: added, accepted };
+  });
+}
+
+/** Removes a double or triple delivery from this driver's pool only. */
+async function rejectPoolOrders(driverId, orderIds) {
+  for (const id of new Set(orderIds)) await rejectPoolOrder(driverId, id);
+}
+
+/** Adds one pool order to a driver's run. The driver row must already be locked. */
+async function takeFromPool(client, driver, config, orderId) {
+  const driverId = driver.id;
+  const inHouse = driver.driver_type === 'restaurant_own';
+  const room = await driverRoom(client, driver, config);
+  if (room.reason === 'offline') return { ok: false, message: 'Go online to take orders.' };
+  if (room.reason === 'full') {
+    return {
+      ok: false,
+      message: `You already have ${room.activeOrders} of ${room.maxOrders} orders. Deliver one to take another.`,
+    };
+  }
+  if (room.reason === 'no_location') {
+    return { ok: false, message: 'Turn on location so we can match you with orders near you.' };
+  }
+
+  // If another driver is taking the same order this waits for them to finish, then checks
+  // again: the first to commit gets it, the other is told it has been taken.
+  const { rows } = await client.query(
+    `SELECT o.id, o.distance_miles, o.hybrid, o.restaurant_id, r.latitude, r.longitude
+       FROM orders o JOIN restaurants r ON r.id = o.restaurant_id
+      WHERE o.id = $1 AND o.batch_id IS NULL AND o.dispatch_type = 'open_platform'
+        AND o.status IN ('preparing', 'ready_for_pickup')
+        AND (o.pool_expires_at IS NULL OR o.pool_expires_at > now())
+      FOR UPDATE OF o`,
+    [orderId]
+  );
+  const order = rows[0];
+  if (!order) {
+    const left = await client.query(
+      `SELECT 1 FROM orders WHERE id = $1 AND batch_id IS NULL AND dispatch_type = 'open_platform'
+          AND status IN ('preparing', 'ready_for_pickup') AND pool_expires_at <= now()`,
       [orderId]
     );
-    const order = rows[0];
-    if (!order) {
-      const left = await client.query(
-        `SELECT 1 FROM orders WHERE id = $1 AND batch_id IS NULL AND dispatch_type = 'open_platform'
-            AND status IN ('preparing', 'ready_for_pickup') AND pool_expires_at <= now()`,
-        [orderId]
-      );
-      return { ok: false, message: left.rows[0] ? 'This order has left the pool.' : 'That order has just been taken.' };
-    }
-    if (inHouse && !(order.hybrid && order.restaurant_id === driver.employer_restaurant_id)) {
-      return { ok: false, message: 'This order is only for platform drivers.' };
-    }
-    const declined = await client.query(
-      `SELECT 1 FROM batch_declines WHERE driver_id = $1 AND order_id = $2
-          AND created_at > now() - make_interval(mins => $3)`,
-      [driverId, orderId, REOFFER_AFTER_MINUTES]
-    );
-    if (declined.rows[0]) return { ok: false, message: 'This order has been given to another driver.' };
-    if (!inHouse && !withinReach(room.here, order, config)) {
-      return { ok: false, message: 'This order is too far from where you are now.' };
-    }
+    return { ok: false, message: left.rows[0] ? 'This order has left the pool.' : 'That order has just been taken.' };
+  }
+  if (inHouse && !(order.hybrid && order.restaurant_id === driver.employer_restaurant_id)) {
+    return { ok: false, message: 'This order is only for platform drivers.' };
+  }
+  const declined = await client.query(
+    `SELECT 1 FROM batch_declines WHERE driver_id = $1 AND order_id = $2
+        AND created_at > now() - make_interval(mins => $3)`,
+    [driverId, orderId, REOFFER_AFTER_MINUTES]
+  );
+  if (declined.rows[0]) return { ok: false, message: 'This order has been given to another driver.' };
+  if (!inHouse && !withinReach(room.here, order, config)) {
+    return { ok: false, message: 'This order is too far from where you are now.' };
+  }
 
-    let batch = await openBatch(client, driverId, { lock: true });
-    if (!batch) {
-      await acknowledgeCompleted(driverId, client);
-      batch = (
-        await client.query(
-          `INSERT INTO batches (driver_id, status, accepted_at) VALUES ($1, 'accepted', now()) RETURNING *`,
-          [driverId]
-        )
-      ).rows[0];
-    }
-    const count = await fileDeliveredOrders(client, batch, await countOrders(client, batch.id));
+  let batch = await openBatch(client, driverId, { lock: true });
+  if (!batch) {
+    await acknowledgeCompleted(driverId, client);
+    batch = (
+      await client.query(
+        `INSERT INTO batches (driver_id, status, accepted_at) VALUES ($1, 'accepted', now()) RETURNING *`,
+        [driverId]
+      )
+    ).rows[0];
+  }
+  const count = await fileDeliveredOrders(client, batch, await countOrders(client, batch.id));
 
-    const position = count + 1;
-    const dispatchType = inHouse ? 'own_driver' : 'open_platform';
-    const customFee = await pricing.customFeeOf(client, order.restaurant_id);
-    const fin = pricing.calculateOrderFinancials(config, Number(order.distance_miles), position, dispatchType, customFee);
-    await client.query(
-      `UPDATE orders SET batch_id = $1, batch_position = $2, assigned_driver_id = $3, status = $4,
-              restaurant_fee_gbp = $5, driver_payout_gbp = $6, dispatch_type = $8
-        WHERE id = $7`,
-      [
-        batch.id,
-        position,
-        driverId,
-        batch.status === 'accepted' ? 'driver_assigned' : 'batched_offered',
-        fin.restaurantFeeGbp,
-        fin.driverPayoutGbp,
-        order.id,
-        dispatchType,
-      ]
-    );
-    return {
-      ok: true,
-      message: position === 1 ? 'Order accepted. Head to the merchant.' : `Added as Order #${position} in your run.`,
-      orderId: order.id,
-      accepted: batch.status === 'accepted',
-    };
-  });
+  const position = count + 1;
+  const dispatchType = inHouse ? 'own_driver' : 'open_platform';
+  const customFee = await pricing.customFeeOf(client, order.restaurant_id);
+  const fin = pricing.calculateOrderFinancials(config, Number(order.distance_miles), position, dispatchType, customFee);
+  await client.query(
+    `UPDATE orders SET batch_id = $1, batch_position = $2, assigned_driver_id = $3, status = $4,
+            restaurant_fee_gbp = $5, driver_payout_gbp = $6, dispatch_type = $8
+      WHERE id = $7`,
+    [
+      batch.id,
+      position,
+      driverId,
+      batch.status === 'accepted' ? 'driver_assigned' : 'batched_offered',
+      fin.restaurantFeeGbp,
+      fin.driverPayoutGbp,
+      order.id,
+      dispatchType,
+    ]
+  );
+  return {
+    ok: true,
+    message: position === 1 ? 'Order accepted. Head to the merchant.' : `Added as Order #${position} in your run.`,
+    orderId: order.id,
+    accepted: batch.status === 'accepted',
+  };
 }
 
 /**
@@ -725,5 +829,8 @@ module.exports = {
   advance,
   acknowledgeCompleted,
   appendPoolOrder,
+  appendPoolOrders,
+  rejectPoolOrders,
+  groupPoolOrders,
   assignToOwnDriver,
 };
